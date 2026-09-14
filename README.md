@@ -1,47 +1,49 @@
 # Zanbot
 
-用 Python 和 requests 调用 Anthropic Messages API 的终端多轮对话助手。
+English | [简体中文](README.zh-CN.md)
 
-## 运行（PowerShell）
+A multi-turn terminal chat assistant built with Python, requests, and the Anthropic Messages API.
+
+## Run (PowerShell)
 
 ```powershell
 uv sync
-$env:ANTHROPIC_API_KEY = "你的 API 密钥"
+$env:ANTHROPIC_API_KEY = "your-api-key"
 uv run python main.py
 ```
 
-若已设置 Windows 用户环境变量但当前终端未读取到：
+If you have already saved the key as a Windows user environment variable but your current terminal has not loaded it:
 
 ```powershell
 $env:ANTHROPIC_API_KEY = [Environment]::GetEnvironmentVariable("ANTHROPIC_API_KEY", "User")
 ```
 
-默认模型沿用 `claude-sonnet-4-5`，可通过 `ANTHROPIC_MODEL` 环境变量修改。
-不要将真实密钥写入项目文件。
+The default model is `claude-sonnet-4-5`. Set the `ANTHROPIC_MODEL` environment variable to use a different model.
+Do not put your actual API key in project files.
 
-- 输入文字并回车，开始或继续对话。
-- 回答以流式方式逐段显示，无需等待整段生成完毕。
-- `/clear`：清空历史，开始新对话。
-- `/exit`、Ctrl+C 或输入结束：退出。
-- 空输入会被忽略；失败的请求不会写入历史。
+- Enter a message and press Enter to start or continue a conversation.
+- Responses appear incrementally as text arrives, without waiting for the entire answer.
+- `/clear`: clear the history and start a new conversation.
+- `/exit`, Ctrl+C, or end of input: exit the application.
+- Blank input is ignored, and failed requests are not saved to the history.
 
-历史仅保存在内存，退出后消失。每轮发送完整历史，因此长对话会增加输入 token 用量，并可能达到上下文上限；可用 `/clear` 重置。
-当前版本支持文本多轮对话和流式输出，尚未加入工具调用和持久化记忆。
-收到完整的结束事件后才保存本轮问答；中途断流时，已显示的片段不会进入历史，可重新输入重试。
+History is kept in memory and is lost when the application exits. Each turn sends the full history, so longer conversations use more input tokens and may reach the context limit. Use `/clear` to reset it.
+The current version supports multi-turn text conversations and streaming output. Tool calling and persistent memory are not yet implemented.
+A turn is saved only after the complete ending event is received. If the stream is interrupted, the displayed fragments are not saved to the history; you can enter your message again to retry.
 
-## 文件职责
+## File responsibilities
 
-- `main.py`：终端交互。
-- `zanbot/config.py`：环境变量与配置。
-- `zanbot/llm.py`：HTTP 请求与错误处理。
-- `zanbot/streaming.py`：SSE 事件解析、文本增量回调和完整回答组装。
-- `zanbot/agent.py`：会话历史与单轮对话。
-- `zanbot/prompts.py`：系统提示词。
+- `main.py`: terminal interaction.
+- `zanbot/config.py`: environment variables and configuration.
+- `zanbot/llm.py`: HTTP requests and error handling.
+- `zanbot/streaming.py`: SSE event parsing, text callbacks, and complete response assembly.
+- `zanbot/agent.py`: conversation history and individual turns.
+- `zanbot/prompts.py`: the system prompt.
 
-## 离线测试
+## Offline tests
 
 ```powershell
 uv run python -m unittest discover -s tests -v
 ```
 
-测试使用模拟 API，不消耗 API 额度。
+Tests use a mocked API and do not consume API credits.
