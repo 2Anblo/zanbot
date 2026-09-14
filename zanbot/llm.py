@@ -1,0 +1,46 @@
+import requests
+
+from zanbot.prompts import SYSTEM_PROMPT
+
+
+class APIError(Exception):
+    """An API error with a message suitable for display to the user."""
+
+
+def create_message(messages, config):
+
+    url = "https://api.anthropic.com/v1/messages"
+
+    try:
+        response = requests.post(
+            url,
+            headers={
+                "x-api-key": config.api_key,
+                "anthropic-version": "2023-06-01",
+                "content-type": "application/json",
+            },
+            json={
+                "model": config.model,
+                "max_tokens": config.max_tokens,
+                "system": SYSTEM_PROMPT,
+                "messages": messages,
+            },
+            timeout=(10, 120),
+        )
+    except requests.Timeout as exc:
+        raise APIError("The connection or response timed out. Please try again later.") from exc
+    except requests.RequestException as exc:
+        raise APIError("The network request failed. Please check your connection.") from exc
+    if not response.ok:
+        hints = {
+            401: "Invalid API key. Please check ANTHROPIC_API_KEY.",
+            403: "Your account does not have access permission.",
+            404: "Model not found. Please check ANTHROPIC_MODEL.",
+            429: "Request or quota limit reached. Please try again later.",
+        }
+        hint = hints.get(response.status_code, "Check your model, account credits, or service status. If the history is too long, use /clear to start a new conversation.")
+        raise APIError(f"HTTP {response.status_code}: {hint}")
+    try:
+        return response.json()
+    except ValueError as exc:
+        raise APIError("The API returned invalid JSON.") from exc
