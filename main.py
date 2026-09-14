@@ -3,6 +3,10 @@ from zanbot.config import load_config
 from zanbot.llm import APIError
 
 
+def print_chunk(text):
+    print(text, end="", flush=True)
+
+
 def main():
     try:
         config = load_config()
@@ -23,11 +27,12 @@ def main():
                 print("Conversation cleared.")
                 continue
             try:
-                text, truncated = run_turn(messages, user_input, config)
+                print("\nZanbot: ", end="", flush=True)
+                _, truncated = run_turn(messages, user_input, config, on_text=print_chunk)
             except APIError as exc:
-                print(f"Request failed: {exc}\nThis turn was not saved. Please try again.")
+                print(f"\nRequest failed: {exc}\nThis turn was not saved. Any text shown above may be incomplete. Please try again.")
                 continue
-            print(f"\nZanbot: {text}")
+            print()
             if truncated:
                 print('(The response reached the output limit. You can type "continue".)')
     except (EOFError, KeyboardInterrupt):

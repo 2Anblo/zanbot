@@ -1,3 +1,4 @@
+import json
 import unittest
 from unittest.mock import Mock, patch
 
@@ -9,10 +10,26 @@ from zanbot.config import Config, load_config
 from zanbot.llm import APIError
 
 
+def events_for(text="你好", stop="end_turn"):
+    return [
+        {"type": "message_start", "message": {"role": "assistant", "content": []}},
+        {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}},
+        {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": text}},
+        {"type": "content_block_stop", "index": 0},
+        {"type": "message_delta", "delta": {"stop_reason": stop}},
+        {"type": "message_stop"},
+    ]
+
+
+def wire_lines(events):
+    for event in events:
+        yield f"event: {event['type']}".encode()
+        yield ("data: " + json.dumps(event, ensure_ascii=False)).encode("utf-8")
+        yield b""
+
+
 def reply(text="你好", stop="end_turn"):
-    return Mock(ok=True, json=Mock(return_value={
-        "content": [{"type": "text", "text": text}], "stop_reason": stop,
-    }))
+    return Mock(ok=True, iter_lines=Mock(return_value=wire_lines(events_for(text, stop))))
 
 
 class ChatTests(unittest.TestCase):
@@ -39,8 +56,8 @@ class ChatTests(unittest.TestCase):
                    {"role": "assistant", "content": "你好"}]
         original = list(history)
         for result in [requests.Timeout(), Mock(ok=False, status_code=401),
-                       Mock(ok=True, json=Mock(return_value={})),
-                       Mock(ok=True, json=Mock(side_effect=ValueError()))]:
+                       Mock(ok=True, iter_lines=Mock(return_value=iter([]))),
+                       Mock(ok=True, iter_lines=Mock(return_value=iter([b"data: invalid", b""])))]:
             with self.subTest(result=result):
                 post.side_effect = result if isinstance(result, Exception) else None
                 post.return_value = result
