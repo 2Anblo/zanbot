@@ -52,13 +52,14 @@ Do not put your actual API key in project files.
 - `/memory`: list saved long-term memories with their IDs.
 - `/remember [kind] <text>`: save a memory. Optional kind: profile, preference, project, event, relationship, or note (default).
 - `/forget <id>`: delete a memory and erase its text.
+- `/memory off` / `/memory on`: pause or resume automatic memory for this session.
 - `/exit`, Ctrl+C, or end of input: exit the application.
 - Blank input is ignored, and failed requests are not saved to the history.
 
 History is kept in memory and is lost when the application exits. Each turn sends the full history, so longer conversations use more input tokens and may reach the context limit. Use `/clear` to reset it.
-The current version supports multi-turn text conversations and streaming output. Tool calling and automatic memory extraction are not yet implemented.
+The current version supports multi-turn text conversations and streaming output. Tool calling is not yet implemented.
 
-Long-term memories are stored in `%LOCALAPPDATA%/zanbot/memory.db` on Windows (`~/.config/zanbot/memory.db` elsewhere), outside this repository and unencrypted. Each turn adds today's date and the saved memories (up to 2,000 characters, profile first) to the system prompt as background data. Text that looks like a password, key, or token is refused. Start with `--no-memory` to neither read nor write memories. See the [memory design](docs/long-term-memory.md).
+Long-term memories are stored in `%LOCALAPPDATA%/zanbot/memory.db` on Windows (`~/.config/zanbot/memory.db` elsewhere), outside this repository and unencrypted. Each turn adds today's date and the saved memories (up to 2,000 characters, profile first) to the system prompt as background data. Text that looks like a password, key, or token is refused. After each completed turn, a background request asks the model which durable facts about you to add, update, or delete; changes appear as a `✓ Remembered #id` line, undoable with `/forget <id>`. Extraction uses one extra request per turn, counted against your usage. Set `ZANBOT_MEMORY_MODEL` to use a cheaper model for it (default: the chat model, same provider). Failed or interrupted turns are never extracted, and extraction failures never interrupt chat. Start with `--no-memory` to neither read nor write memories. See the [memory design](docs/long-term-memory.md).
 A turn is saved only after the complete ending event is received. If the stream is interrupted, the displayed fragments are not saved to the history; you can enter your message again to retry.
 
 ## File responsibilities
@@ -70,6 +71,7 @@ A turn is saved only after the complete ending event is received. If the stream 
 - `zanbot/agent.py`: conversation history and individual turns.
 - `zanbot/prompts.py`: the system prompt and memory injection.
 - `zanbot/memory.py`: local SQLite memory storage, secret filtering, and recall.
+- `zanbot/memory_extract.py`: extraction prompt, reply validation, and the background worker.
 - `zanbot/chatgpt_auth.py`: OAuth, encrypted credentials, account selection, renewal, and logout.
 - `zanbot/chatgpt.py`: ChatGPT model catalog and Responses API streaming.
 

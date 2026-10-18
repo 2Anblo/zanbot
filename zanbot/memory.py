@@ -45,6 +45,13 @@ class Memory:
     updated_at: str
 
 
+@dataclass(frozen=True)
+class Change:
+    action: str  # add | update | delete
+    id: int
+    content: str
+
+
 def memory_directory():
     return Path(os.environ.get("LOCALAPPDATA", Path.home() / ".config")) / "zanbot"
 
@@ -78,17 +85,50 @@ class MemoryStore:
         connection.row_factory = sqlite3.Row
         return connection
 
-    def add(self, content, kind="note", source="manual", session_id=None, valid_until=None):
+    def add(self, content, kind="note", source="manual", session_id=None, valid_until=None, keywords=()):
+        with closing(self.connect()) as connection, connection:
+            return self._insert(connection, content, kind, source, session_id, valid_until, keywords)
+
+    def _insert(self, connection, content, kind, source, session_id, valid_until, keywords, replaces=None):
         if kind not in KINDS:
             raise MemoryStoreError("Memory kind must be one of: " + ", ".join(KINDS) + ".")
         content = check_content(content)
         now = datetime.now(timezone.utc).isoformat()
+        cursor = connection.execute(
+            "INSERT INTO memories (content, keywords, kind, valid_until, created_at, updated_at, source,"
+            " session_id, replaces) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            (content, " ".join(keywords), kind, valid_until, now, now, source, session_id, replaces))
+        return cursor.lastrowid
+
+    def apply_ops(self, ops, session_id=None):
+        """Apply validated extraction ops in one transaction and return what changed."""
+        changes = []
+        now = datetime.now(timezone.utc).isoformat()
         with closing(self.connect()) as connection, connection:
-            cursor = connection.execute(
-                "INSERT INTO memories (content, kind, valid_until, created_at, updated_at, source, session_id)"
-                " VALUES (?, ?, ?, ?, ?, ?, ?)",
-                (content, kind, valid_until, now, now, source, session_id))
-            return cursor.lastrowid
+            for op in ops:
+                # The user may have run /forget since extraction started, so skip inactive targets.
+                old = None
+                if op["op"] != "add":
+                    old = connection.execute(
+                        "SELECT content, kind, valid_until FROM memories WHERE id = ? AND status = 'active'",
+                        (op["id"],)).fetchone()
+                    if old is None:
+                        continue
+                if op["op"] == "delete":
+                    connection.execute(
+                        "UPDATE memories SET status = 'deleted', content = '', keywords = '', updated_at = ?"
+                        " WHERE id = ?", (now, op["id"]))
+                    changes.append(Change("delete", op["id"], old["content"]))
+                    continue
+                if old is not None:
+                    connection.execute("UPDATE memories SET status = 'superseded', updated_at = ? WHERE id = ?",
+                                       (now, op["id"]))
+                memory_id = self._insert(
+                    connection, op["content"], op.get("kind") or old["kind"], "auto", session_id,
+                    op.get("valid_until", old["valid_until"] if old else None), op.get("keywords", ()),
+                    replaces=op.get("id"))
+                changes.append(Change(op["op"], memory_id, check_content(op["content"])))
+        return changes
 
     def forget(self, memory_id):
         """Soft-delete and erase the text so forgetting is real."""

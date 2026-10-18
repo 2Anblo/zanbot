@@ -52,13 +52,14 @@ $env:ANTHROPIC_API_KEY = [Environment]::GetEnvironmentVariable("ANTHROPIC_API_KE
 - `/memory`：列出已保存的长期记忆及其 ID。
 - `/remember [类别] <内容>`：保存一条记忆。类别可选 profile、preference、project、event、relationship，默认 note。
 - `/forget <id>`：删除一条记忆，并清除其内容。
+- `/memory off` / `/memory on`：本次会话暂停或恢复自动记忆。
 - `/exit`、Ctrl+C 或输入结束：退出。
 - 空输入会被忽略；失败的请求不会写入历史。
 
 历史仅保存在内存，退出后消失。每轮发送完整历史，因此长对话会增加输入 token 用量，并可能达到上下文上限；可用 `/clear` 重置。
-当前版本支持文本多轮对话和流式输出，尚未加入工具调用和自动记忆提取。
+当前版本支持文本多轮对话和流式输出，尚未加入工具调用。
 
-长期记忆保存在 `%LOCALAPPDATA%/zanbot/memory.db`（其他平台为 `~/.config/zanbot/memory.db`），位于仓库之外，未加密。每轮会把当天日期和已保存的记忆（最多 2,000 字符，profile 优先）作为背景资料加入系统提示词。疑似密码、密钥或 token 的内容会被拒绝保存。使用 `--no-memory` 启动则完全不读写记忆。详见[记忆设计文档](docs/long-term-memory.md)。
+长期记忆保存在 `%LOCALAPPDATA%/zanbot/memory.db`（其他平台为 `~/.config/zanbot/memory.db`），位于仓库之外，未加密。每轮会把当天日期和已保存的记忆（最多 2,000 字符，profile 优先）作为背景资料加入系统提示词。疑似密码、密钥或 token 的内容会被拒绝保存。每轮成功回答后，后台会再请求一次模型，判断要新增、更新或删除哪些关于你的长期信息；有变化时显示 `✓ Remembered #id`，可用 `/forget <id>` 撤销。提取每轮多一次请求，会计入用量；设置 `ZANBOT_MEMORY_MODEL` 可让提取改用更便宜的模型（默认与对话模型相同，provider 不变）。失败或中断的轮次不会提取，提取失败也不会影响对话。使用 `--no-memory` 启动则完全不读写记忆。详见[记忆设计文档](docs/long-term-memory.md)。
 收到完整的结束事件后才保存本轮问答；中途断流时，已显示的片段不会进入历史，可重新输入重试。
 
 ## 文件职责
@@ -70,6 +71,7 @@ $env:ANTHROPIC_API_KEY = [Environment]::GetEnvironmentVariable("ANTHROPIC_API_KE
 - `zanbot/agent.py`：会话历史与单轮对话。
 - `zanbot/prompts.py`：系统提示词和记忆注入。
 - `zanbot/memory.py`：本地 SQLite 记忆存储、密钥过滤和召回。
+- `zanbot/memory_extract.py`：提取提示词、回复校验和后台线程。
 - `zanbot/chatgpt_auth.py`：OAuth、凭据加密、账户切换、续期和退出登录。
 - `zanbot/chatgpt.py`：ChatGPT 模型列表和 Responses 流式请求。
 
