@@ -9,6 +9,10 @@ class APIError(Exception):
 
 
 def create_message(messages, config, on_text=None):
+    if config.provider == "chatgpt":
+        from zanbot.chatgpt import create_message as create_chatgpt_message
+
+        return create_chatgpt_message(messages, config, on_text)
 
     url = "https://api.anthropic.com/v1/messages"
 

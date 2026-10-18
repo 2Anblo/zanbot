@@ -1,6 +1,12 @@
 [project]
 name = "zanbot"
 version = "0.1.0"
-description = "A simple multi-turn Claude chat assistant"
+description = "A streaming chat assistant with Anthropic and ChatGPT plan support"
 requires-python = ">=3.10"
-dependencies = ["requests>=2.32.3,<3"]
+dependencies = [
+    "cryptography>=44,<51",
+    "filelock>=3.16,<4",
+    "keyring>=25,<26",
+    "pyjwt[crypto]>=2.10,<3",
+    "requests>=2.32.3,<3",
+]
