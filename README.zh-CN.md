@@ -49,11 +49,16 @@ $env:ANTHROPIC_API_KEY = [Environment]::GetEnvironmentVariable("ANTHROPIC_API_KE
 - 输入文字并回车，开始或继续对话。
 - 回答以流式方式逐段显示，无需等待整段生成完毕。
 - `/clear`：清空历史，开始新对话。
+- `/memory`：列出已保存的长期记忆及其 ID。
+- `/remember [类别] <内容>`：保存一条记忆。类别可选 profile、preference、project、event、relationship，默认 note。
+- `/forget <id>`：删除一条记忆，并清除其内容。
 - `/exit`、Ctrl+C 或输入结束：退出。
 - 空输入会被忽略；失败的请求不会写入历史。
 
 历史仅保存在内存，退出后消失。每轮发送完整历史，因此长对话会增加输入 token 用量，并可能达到上下文上限；可用 `/clear` 重置。
-当前版本支持文本多轮对话和流式输出，尚未加入工具调用和持久化记忆。
+当前版本支持文本多轮对话和流式输出，尚未加入工具调用和自动记忆提取。
+
+长期记忆保存在 `%LOCALAPPDATA%/zanbot/memory.db`（其他平台为 `~/.config/zanbot/memory.db`），位于仓库之外，未加密。每轮会把当天日期和已保存的记忆（最多 2,000 字符，profile 优先）作为背景资料加入系统提示词。疑似密码、密钥或 token 的内容会被拒绝保存。使用 `--no-memory` 启动则完全不读写记忆。详见[记忆设计文档](docs/long-term-memory.md)。
 收到完整的结束事件后才保存本轮问答；中途断流时，已显示的片段不会进入历史，可重新输入重试。
 
 ## 文件职责
@@ -63,7 +68,8 @@ $env:ANTHROPIC_API_KEY = [Environment]::GetEnvironmentVariable("ANTHROPIC_API_KE
 - `zanbot/llm.py`：HTTP 请求与错误处理。
 - `zanbot/streaming.py`：SSE 事件解析、文本增量回调和完整回答组装。
 - `zanbot/agent.py`：会话历史与单轮对话。
-- `zanbot/prompts.py`：系统提示词。
+- `zanbot/prompts.py`：系统提示词和记忆注入。
+- `zanbot/memory.py`：本地 SQLite 记忆存储、密钥过滤和召回。
 - `zanbot/chatgpt_auth.py`：OAuth、凭据加密、账户切换、续期和退出登录。
 - `zanbot/chatgpt.py`：ChatGPT 模型列表和 Responses 流式请求。
 

@@ -47,7 +47,7 @@ CREATE TABLE memories (
   id          INTEGER PRIMARY KEY,
   content     TEXT NOT NULL,      -- 一条自然语言事实，例如"用户喜欢喝美式咖啡"
   keywords    TEXT NOT NULL DEFAULT '',  -- 提取时生成的相关词，空格分隔，例如"咖啡 饮品 提神 coffee"
-  kind        TEXT NOT NULL,      -- profile | preference | project | event | relationship
+  kind        TEXT NOT NULL,      -- profile | preference | project | event | relationship | note（手动添加时的默认类别）
   status      TEXT NOT NULL DEFAULT 'active',  -- active | superseded | deleted
   valid_until TEXT,               -- 事件类记忆的过期日期 (ISO date)，可空
   created_at  TEXT NOT NULL,

@@ -8,11 +8,11 @@ class APIError(Exception):
     """An API error with a message suitable for display to the user."""
 
 
-def create_message(messages, config, on_text=None):
+def create_message(messages, config, on_text=None, system=None):
     if config.provider == "chatgpt":
         from zanbot.chatgpt import create_message as create_chatgpt_message
 
-        return create_chatgpt_message(messages, config, on_text)
+        return create_chatgpt_message(messages, config, on_text, system)
 
     url = "https://api.anthropic.com/v1/messages"
 
@@ -27,7 +27,7 @@ def create_message(messages, config, on_text=None):
             json={
                 "model": config.model,
                 "max_tokens": config.max_tokens,
-                "system": SYSTEM_PROMPT,
+                "system": system or SYSTEM_PROMPT,
                 "messages": messages,
                 "stream": True,
             },

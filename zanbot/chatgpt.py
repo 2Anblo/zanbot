@@ -62,7 +62,7 @@ def read_response(lines, on_text=None):
     raise ValueError("The stream ended before response.completed.")
 
 
-def create_message(messages, config, on_text=None):
+def create_message(messages, config, on_text=None, system=None):
     from zanbot.llm import APIError
 
     try:
@@ -75,7 +75,7 @@ def create_message(messages, config, on_text=None):
         with requests.post(
             RESOURCE + "/responses",
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            json={"model": config.model, "instructions": SYSTEM_PROMPT, "input": inputs,
+            json={"model": config.model, "instructions": system or SYSTEM_PROMPT, "input": inputs,
                   "store": False, "stream": True},
             stream=True, timeout=(10, 120),
         ) as response:

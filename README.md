@@ -49,11 +49,16 @@ Do not put your actual API key in project files.
 - Enter a message and press Enter to start or continue a conversation.
 - Responses appear incrementally as text arrives, without waiting for the entire answer.
 - `/clear`: clear the history and start a new conversation.
+- `/memory`: list saved long-term memories with their IDs.
+- `/remember [kind] <text>`: save a memory. Optional kind: profile, preference, project, event, relationship, or note (default).
+- `/forget <id>`: delete a memory and erase its text.
 - `/exit`, Ctrl+C, or end of input: exit the application.
 - Blank input is ignored, and failed requests are not saved to the history.
 
 History is kept in memory and is lost when the application exits. Each turn sends the full history, so longer conversations use more input tokens and may reach the context limit. Use `/clear` to reset it.
-The current version supports multi-turn text conversations and streaming output. Tool calling and persistent memory are not yet implemented.
+The current version supports multi-turn text conversations and streaming output. Tool calling and automatic memory extraction are not yet implemented.
+
+Long-term memories are stored in `%LOCALAPPDATA%/zanbot/memory.db` on Windows (`~/.config/zanbot/memory.db` elsewhere), outside this repository and unencrypted. Each turn adds today's date and the saved memories (up to 2,000 characters, profile first) to the system prompt as background data. Text that looks like a password, key, or token is refused. Start with `--no-memory` to neither read nor write memories. See the [memory design](docs/long-term-memory.md).
 A turn is saved only after the complete ending event is received. If the stream is interrupted, the displayed fragments are not saved to the history; you can enter your message again to retry.
 
 ## File responsibilities
@@ -63,7 +68,8 @@ A turn is saved only after the complete ending event is received. If the stream 
 - `zanbot/llm.py`: HTTP requests and error handling.
 - `zanbot/streaming.py`: SSE event parsing, text callbacks, and complete response assembly.
 - `zanbot/agent.py`: conversation history and individual turns.
-- `zanbot/prompts.py`: the system prompt.
+- `zanbot/prompts.py`: the system prompt and memory injection.
+- `zanbot/memory.py`: local SQLite memory storage, secret filtering, and recall.
 - `zanbot/chatgpt_auth.py`: OAuth, encrypted credentials, account selection, renewal, and logout.
 - `zanbot/chatgpt.py`: ChatGPT model catalog and Responses API streaming.
 
