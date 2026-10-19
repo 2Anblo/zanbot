@@ -63,7 +63,7 @@ def read_response(lines, on_text=None):
 
 
 def create_message(messages, config, on_text=None, system=None):
-    from zanbot.llm import APIError
+    from zanbot.llm import APIError, post_with_retry, server_error_hint
 
     try:
         token = get_access_token()
@@ -72,19 +72,20 @@ def create_message(messages, config, on_text=None, system=None):
             content = message["content"]
             text = content if isinstance(content, str) else "\n".join(block["text"] for block in content)
             inputs.append({"role": message["role"], "content": text})
-        with requests.post(
+        with post_with_retry(lambda: requests.post(
             RESOURCE + "/responses",
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
             json={"model": config.model, "instructions": system or SYSTEM_PROMPT, "input": inputs,
                   "store": False, "stream": True},
             stream=True, timeout=(10, 120),
-        ) as response:
+        )) as response:
             if not response.ok:
                 hints = {401: "Run --login to renew your session.",
                          403: "Check ChatGPT plan sharing permission for Zanbot.",
                          429: "Your ChatGPT plan usage limit may have been reached."}
-                raise APIError(f"ChatGPT HTTP {response.status_code}: " + hints.get(
-                    response.status_code, "Check the selected model and ChatGPT service status."))
+                hint = (hints.get(response.status_code) or server_error_hint(response.status_code, "ChatGPT")
+                        or "Check the selected model and ChatGPT service status.")
+                raise APIError(f"ChatGPT HTTP {response.status_code}: {hint}")
             result = read_response(response.iter_lines(chunk_size=1), on_text)
             record_chatgpt_usage(result, config.model, config.session_id)
             return result

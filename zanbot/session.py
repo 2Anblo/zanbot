@@ -159,7 +159,11 @@ class ChatSession:
                 memories = self.store.recall()
             except sqlite3.Error:
                 self.info("Warning: Could not read memories for this turn.")
-        return build_system_prompt(memories, date.today())
+        if self.store is None:
+            memory = "off"
+        else:
+            memory = "on" if self.worker is not None and self.worker.enabled else "paused"
+        return build_system_prompt(memories, date.today(), memory)
 
     def clear(self):
         self.messages.clear()
