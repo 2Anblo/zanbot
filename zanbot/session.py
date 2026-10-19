@@ -52,6 +52,20 @@ class ExitRequested:
     pass
 
 
+@dataclass(frozen=True)
+class StatusChanged:
+    """Something shown in a status bar changed, possibly from the memory worker thread."""
+
+
+@dataclass(frozen=True)
+class Status:
+    provider: str
+    model: str
+    memories: int | None  # None when memory is off
+    auto_memory: bool
+    saving: bool
+
+
 class ChatSession:
     """Own the history, memory, and commands for one conversation."""
 
@@ -85,6 +99,7 @@ class ChatSession:
         self.emit(ReplyFinished(answer, truncated))
         if self.worker is not None:
             self.worker.submit(self.config, text, answer)
+            self.emit(StatusChanged())
 
     def system_prompt(self):
         memories = []
@@ -102,6 +117,27 @@ class ChatSession:
 
     def request_exit(self):
         self.emit(ExitRequested())
+
+    def live_notices(self):
+        """Emit worker notices as they happen. Only for frontends whose emit is safe from another thread."""
+        if self.worker is not None:
+            self.worker.listener = self._on_worker_update
+
+    def _on_worker_update(self, notices):
+        for notice in notices:
+            self.emit(MemoryNotice(notice))
+        self.emit(StatusChanged())
+
+    def status(self):
+        memories = None
+        if self.store is not None:
+            try:
+                memories = len(self.store.active())
+            except sqlite3.Error:
+                pass
+        worker = self.worker
+        return Status(self.config.provider, self.config.model, memories,
+                      worker is not None and worker.enabled, worker is not None and worker.busy)
 
     def flush_notices(self):
         """Emit memory notices collected by the background worker since the last flush."""

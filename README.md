@@ -62,14 +62,32 @@ History is kept in memory and is lost when the application exits. Each turn send
 The current version supports multi-turn text conversations and streaming output. Tool calling is not yet implemented.
 
 Long-term memories are stored in `%LOCALAPPDATA%/zanbot/memory.db` on Windows (`~/.config/zanbot/memory.db` elsewhere), outside this repository and unencrypted. Each turn adds today's date and the saved memories (up to 2,000 characters, profile first) to the system prompt as background data. Text that looks like a password, key, or token is refused. After each completed turn, a background request asks the model which durable facts about you to add, update, or delete; changes appear as a `✓ Remembered #id` line, undoable with `/forget <id>`. Extraction uses one extra request per turn, counted against your usage. Set `ZANBOT_MEMORY_MODEL` to use a cheaper model for it (default: the chat model, same provider). Failed or interrupted turns are never extracted, and extraction failures never interrupt chat. Start with `--no-memory` to neither read nor write memories. See the [memory design](docs/long-term-memory.md).
+
+## Interactive terminal
+
+In PowerShell, Windows Terminal, or cmd, Zanbot uses an interactive prompt:
+
+- Type `/` to see commands with descriptions; Tab completes them. `/memory`, `/remember`, and `/forget` also complete their first argument (`/forget` shows each memory's ID and a preview).
+- The bottom bar shows the provider, model, memory count, whether automatic memory is on, and `saving…` while extraction runs.
+- Memory notices appear above the prompt as soon as extraction finishes, without waiting for your next message.
+- Up/Down browse input history, saved to `%LOCALAPPDATA%/zanbot/history.txt` (`~/.config/zanbot/history.txt` elsewhere) in plain text. Start with `--no-history` to keep it for the current session only.
+- Shift+Enter or Ctrl+Enter inserts a new line; Enter sends. This works in the Windows console (PowerShell, Windows Terminal, cmd) without any terminal settings, because Zanbot reads Windows key events with their Shift and Ctrl state. Ctrl+J also inserts a new line in most terminals.
+- In the VS Code terminal, Shift+Enter and Ctrl+Enter arrive as a plain Enter, and VS Code uses Ctrl+J itself. Run **Preferences: Open Keyboard Shortcuts (JSON)** and add this entry, which makes Shift+Enter send Escape+Enter (a new line in Zanbot). It applies to every program in the VS Code terminal.
+
+  ```json
+  { "key": "shift+enter", "command": "workbench.action.terminal.sendSequence",
+    "args": { "text": "\u001b\r" }, "when": "terminalFocus" }
+  ```
+
+Pipes, redirected input, and terminals without a Windows console (such as Git Bash's mintty) use simple line input automatically. Start with `--plain` to use it anywhere.
 A turn is saved only after the complete ending event is received. If the stream is interrupted, the displayed fragments are not saved to the history; you can enter your message again to retry.
 
 ## File responsibilities
 
 - `main.py`: command-line options, sign-in actions, and startup.
-- `zanbot/cli.py`: the terminal frontend that reads input and prints session events.
+- `zanbot/cli.py`: terminal frontends (interactive prompt_toolkit and plain line input) that print session events.
 - `zanbot/session.py`: a UI-independent chat session that emits events (reply text, command output, memory notices).
-- `zanbot/commands.py`: the slash command registry used for dispatch and `/help`.
+- `zanbot/commands.py`: the slash command registry used for dispatch, `/help`, and completion.
 - `zanbot/config.py`: environment variables and configuration.
 - `zanbot/llm.py`: HTTP requests and error handling.
 - `zanbot/streaming.py`: SSE event parsing, text callbacks, and complete response assembly.

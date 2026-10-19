@@ -1,4 +1,4 @@
-"""Slash commands, registered once for dispatch, /help, and later completion."""
+"""Slash commands, registered once for dispatch, /help, and completion."""
 
 from dataclasses import dataclass
 import difflib
@@ -16,6 +16,23 @@ class Command:
     help: str
     run: object  # run(session, rest)
     needs_memory: bool = False
+    complete: object = None  # complete(session) -> suggestions for the first argument
+
+
+@dataclass(frozen=True)
+class Suggestion:
+    text: str
+    meta: str = ""
+
+
+KIND_HELP = {
+    "profile": "who you are: name, job, background",
+    "preference": "likes, dislikes, and habits",
+    "project": "ongoing work or study",
+    "event": "something tied to a date",
+    "relationship": "people in your life",
+    "note": "anything else (default)",
+}
 
 
 def run_help(session, rest):
@@ -68,12 +85,27 @@ def run_forget(session, rest):
         session.info("No active memory has that ID.")
 
 
+def complete_memory(session):
+    return [Suggestion("on", "resume automatic memory"), Suggestion("off", "pause automatic memory")]
+
+
+def complete_remember(session):
+    return [Suggestion(kind, KIND_HELP[kind]) for kind in KINDS]
+
+
+def complete_forget(session):
+    return [Suggestion(str(m.id), m.content[:40] + ("…" if len(m.content) > 40 else ""))
+            for m in session.store.active()]
+
+
 COMMANDS = (
     Command("/help", "", "Show all commands", run_help),
     Command("/clear", "", "Clear the conversation and start a new one", run_clear),
-    Command("/memory", "[on|off]", "List memories, or pause/resume automatic memory", run_memory, True),
-    Command("/remember", "[kind] <text>", "Save a memory (kind: " + ", ".join(KINDS) + ")", run_remember, True),
-    Command("/forget", "<id>", "Delete a memory and erase its text", run_forget, True),
+    Command("/memory", "[on|off]", "List memories, or pause/resume automatic memory", run_memory, True,
+            complete_memory),
+    Command("/remember", "[kind] <text>", "Save a memory (kind: " + ", ".join(KINDS) + ")", run_remember, True,
+            complete_remember),
+    Command("/forget", "<id>", "Delete a memory and erase its text", run_forget, True, complete_forget),
     Command("/exit", "", "Quit Zanbot", run_exit),
 )
 BY_NAME = {command.name: command for command in COMMANDS}
@@ -99,3 +131,23 @@ def dispatch(session, text):
         session.info(f"Memory not saved: {exc}")
     except sqlite3.Error:
         session.info("Memory storage failed. Please try again.")
+
+
+def complete(session, text):
+    """Return (start, suggestions) for a partial command line; suggestions replace text[start:]."""
+    if not text.startswith("/"):
+        return len(text), []
+    name, space, rest = text.partition(" ")
+    if not space:
+        return 0, [Suggestion(c.name, f"{c.args}  {c.help}".strip())
+                   for c in COMMANDS if c.name.startswith(name.lower())]
+    command = BY_NAME.get(name.lower())
+    # Only the first argument is completed; free text after it is the user's own.
+    if (command is None or command.complete is None or " " in rest
+            or (command.needs_memory and session.store is None)):
+        return len(text), []
+    try:
+        suggestions = command.complete(session)
+    except sqlite3.Error:
+        return len(text), []
+    return len(name) + 1, [s for s in suggestions if s.text.startswith(rest.lower())]

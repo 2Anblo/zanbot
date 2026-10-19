@@ -127,6 +127,9 @@ class MemoryWorker:
         self.store = store
         self.extract_fn = extract_fn
         self.enabled = True
+        # Optional listener(notices), called on the worker thread after each job.
+        # When set, notices go to it instead of being queued for take_notices().
+        self.listener = None
         self._jobs = []
         self._notices = []
         self._pending = 0
@@ -155,15 +158,23 @@ class MemoryWorker:
                 notices = [format_change(change) for change in self.extract_fn(self.store, *job)]
             except Exception as exc:  # Keep the worker alive; extraction must never break chat.
                 notices = [f"  ! Memory extraction failed: {exc}"]
+            listener = self.listener
             with self._condition:
-                self._notices.extend(notices)
+                if listener is None:
+                    self._notices.extend(notices)
                 self._pending -= 1
                 self._condition.notify_all()
+            if listener is not None:
+                listener(notices)
 
     def wait(self, timeout):
         """Wait for queued jobs and return True when none remain."""
         with self._condition:
             return self._condition.wait_for(lambda: self._pending == 0, timeout)
+
+    @property
+    def busy(self):
+        return self._pending > 0
 
     def take_notices(self):
         with self._condition:

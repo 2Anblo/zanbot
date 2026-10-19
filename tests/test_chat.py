@@ -76,7 +76,7 @@ class ChatTests(unittest.TestCase):
     def test_cli_clear_and_exit(self, post, config, input_mock, print_mock):
         config.return_value = self.config
         post.side_effect = [reply(), reply()]
-        self.assertEqual(main(["--no-memory"]), 0)
+        self.assertEqual(main(["--no-memory", "--plain"]), 0)
         self.assertEqual(post.call_count, 2)
         self.assertEqual(post.call_args.kwargs["json"]["messages"],
                          [{"role": "user", "content": "新对话"}])
@@ -88,7 +88,7 @@ class ChatTests(unittest.TestCase):
     def test_cli_continues_after_failure(self, post, config, input_mock, print_mock):
         config.return_value = self.config
         post.side_effect = [requests.ConnectionError(), reply()]
-        self.assertEqual(main(["--no-memory"]), 0)
+        self.assertEqual(main(["--no-memory", "--plain"]), 0)
         self.assertEqual(post.call_args.kwargs["json"]["messages"],
                          [{"role": "user", "content": "重试"}])
 

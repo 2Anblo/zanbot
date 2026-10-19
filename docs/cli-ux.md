@@ -1,6 +1,6 @@
 # 命令行体验与 session 核心层设计方案
 
-状态：C1 已实现，C2 起待实现。分支：`feature/cli-ux`。
+状态：C1、C2 已实现，C3 待实现。分支：`feature/cli-ux`。
 
 ## 目标
 
@@ -124,22 +124,17 @@ class Command:
 | 按键 | 行为 |
 |---|---|
 | Enter | 发送 |
-| Shift+Enter | 换行（首选，需要在终端里做一次映射，见下文） |
-| Ctrl+Enter | 换行（Windows 上无需配置即可使用） |
-| Alt+Enter / Ctrl+J | 换行（备用；Windows Terminal 默认把 Alt+Enter 用于切换全屏） |
+| Shift+Enter / Ctrl+Enter | 换行（Windows 控制台无需配置） |
+| Ctrl+J | 换行（所有终端通用的备用键） |
 | 粘贴多行文本 | 作为一条消息（依赖 bracketed paste） |
 | ↑ / ↓ | 输入历史 |
 | Ctrl+C（输入时） | 清空当前输入行；空行时再按一次退出 |
 | Ctrl+C（回答时） | 取消本轮回答，回到提示符 |
 | Ctrl+D | 退出 |
 
-**Shift+Enter 换行**：终端传给程序的 Shift+Enter 和普通 Enter 是同一个字符。prompt_toolkit 3.0.53 在 Windows 上也不区分这两者（已核对它的 win32 输入源码：只对 Ctrl+Enter 做了特殊处理，会转成 Meta+Enter）。所以程序内部把 Meta+Enter（也就是 `ESC` 加回车）绑定为换行，再让终端在按 Shift+Enter 时发送这个序列。在 Windows Terminal 的 settings.json 里，往 `actions` 加一条：
+**Shift+Enter 换行**：最初的方案是让终端映射 Shift+Enter，但实测 Windows Terminal 后改了做法。prompt_toolkit 在 Windows 10+ 上默认使用 VT 输入模式，这种模式下按键只是字符：Enter 和 Shift+Enter 都是 `\r`，Ctrl+Enter 和 Ctrl+J 都是 `\n`，Shift+Enter 根本分辨不出来。Legacy 模式的按键事件则带有修饰键状态：Shift+Enter 是 `\r` 加 Shift，Ctrl+Enter 是 `\n` 加 Ctrl。
 
-```json
-{ "command": { "action": "sendInput", "input": "\u001b\r" }, "keys": "shift+enter" }
-```
-
-README 会写清这一步。VS Code 内置终端的做法类似（在 keybindings.json 里用 `workbench.action.terminal.sendSequence`）。程序不会自动修改终端的配置文件。没做映射时 Shift+Enter 等于发送，Ctrl+Enter 照常可以换行。
+所以在 Windows 上，`windows_console_input()` 改用 Legacy 模式读取（`ConsoleInputReader` 的子类），把 Shift+Enter 转成 Meta+Enter；Ctrl+Enter 由 prompt_toolkit 自己转成 Meta+Ctrl+J。这两个序列都绑定为换行，不需要修改任何终端配置。代价是依赖了 prompt_toolkit 的内部类和私有属性，所以依赖版本限定为 `<4`，并有测试覆盖。Ctrl+J 作为所有终端通用的备用键。非 Windows 终端如果要用 Shift+Enter，可以在终端里映射为发送 Escape+Enter。
 
 **输入历史**：保存在 `%LOCALAPPDATA%/zanbot/history.txt`，和其他数据一样放在仓库之外，见文末"待决定"。
 
@@ -160,8 +155,8 @@ README 会写清这一步。VS Code 内置终端的做法类似（在 keybinding
 ## 分期
 
 1. ✅ **C1 抽出 session 和命令注册表（纯重构）**：仍然使用 `input()`，用户看到的行为不变，只多了 `/help` 和未知命令提示。这一步风险最低，测试也最容易补齐。
-2. **C2 接入 prompt_toolkit**：补全、状态栏、实时提示、输入历史、降级逻辑。
-3. **C3 按键细节**：Ctrl+C 取消回答；多行输入（Shift+Enter 映射、Ctrl+Enter）。
+2. ✅ **C2 接入 prompt_toolkit**：补全、状态栏、实时提示、输入历史、降级逻辑。
+3. **C3 按键细节**：Ctrl+C 取消回答。
 
 ## 以后对接 Web 和桌面端
 
@@ -174,4 +169,4 @@ README 会写清这一步。VS Code 内置终端的做法类似（在 keybinding
 1. 输入历史保存到 `%LOCALAPPDATA%/zanbot/history.txt`，提供 `--no-history` 只在内存里保留本次会话的历史。
 2. 改 Ctrl+C 语义：回答时取消本轮，输入时清空当前行（空行再按一次退出），Ctrl+D 或 `/exit` 退出。
 3. 拦截未知的 `/` 命令，给出 "Did you mean" 提示；需要发送以 `/` 开头的消息时，在前面加一个空格。
-4. Shift+Enter 作为首选换行键，靠终端映射实现；Ctrl+Enter 在 Windows 上原生可用。
+4. Shift+Enter 和 Ctrl+Enter 都换行。Windows 上用 Legacy 模式读取按键，靠修饰键状态识别，不需要终端映射。
