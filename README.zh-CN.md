@@ -54,7 +54,9 @@ $env:ANTHROPIC_API_KEY = [Environment]::GetEnvironmentVariable("ANTHROPIC_API_KE
 - `/remember [类别] <内容>`：保存一条记忆。类别可选 profile、preference、project、event、relationship，默认 note。
 - `/forget <id>`：删除一条记忆，并清除其内容。
 - `/memory off` / `/memory on`：本次会话暂停或恢复自动记忆。
-- `/exit`、Ctrl+C 或输入结束：退出。
+- 回答流式输出时（或还在等第一个字时）按 Ctrl+C：取消本轮，不保存任何内容，回到输入提示。
+- 输入时按 Ctrl+C：清空当前行；在空行上连续按两次 Ctrl+C 退出。使用 `--plain` 或管道输入时，在输入提示处按 Ctrl+C 直接退出。
+- `/exit`、Ctrl+D 或输入结束：退出。
 - 空输入会被忽略；失败的请求不会写入历史。
 - 未知的 `/` 命令会提示可能想输入的命令，不会发给模型；要发送以 `/` 开头的消息，在前面加一个空格。
 

@@ -3,6 +3,7 @@
 from dataclasses import dataclass, replace
 from datetime import date
 import sqlite3
+import threading
 import uuid
 
 from zanbot.agent import run_turn
@@ -30,6 +31,11 @@ class ReplyFinished:
 @dataclass(frozen=True)
 class ReplyFailed:
     message: str
+    cancelled: bool = False
+
+
+class ReplyCancelled(Exception):
+    """Raised inside an abandoned reply thread to stop it at its next text chunk."""
 
 
 @dataclass(frozen=True)
@@ -81,25 +87,70 @@ class ChatSession:
             self.emit(Info(lines))
 
     def submit(self, text):
-        """Handle one line of input: a slash command or a message for the model."""
-        if text.startswith("/"):
-            dispatch(self, text.strip())
-            return
-        text = text.strip()
-        if not text:
-            return
-        system = self.system_prompt()
-        self.emit(ReplyStarted())
+        """Handle one line of input: a slash command or a message for the model.
+
+        Ctrl+C (KeyboardInterrupt) cancels the current reply or command and returns normally.
+        """
         try:
-            answer, truncated = run_turn(self.messages, text, self.config,
-                                         on_text=lambda chunk: self.emit(TextDelta(chunk)), system=system)
-        except APIError as exc:
-            self.emit(ReplyFailed(str(exc)))
+            if text.startswith("/"):
+                dispatch(self, text.strip())
+                return
+            text = text.strip()
+            if text:
+                self.reply(text)
+        except KeyboardInterrupt:
+            self.info("Cancelled.")
+
+    def reply(self, text):
+        system = self.system_prompt()
+        # run_turn extends this copy only on success; it is adopted only if the turn was not cancelled.
+        pending = list(self.messages)
+        cancelled = threading.Event()
+        outcome = {}
+
+        def on_text(chunk):
+            if cancelled.is_set():
+                raise ReplyCancelled()
+            self.emit(TextDelta(chunk))
+
+        def work():
+            try:
+                outcome["result"] = run_turn(pending, text, self.config, on_text=on_text, system=system)
+            except ReplyCancelled:
+                pass
+            except APIError as exc:
+                outcome["error"] = exc
+            except BaseException as exc:  # Re-raised on the calling thread below.
+                outcome["crash"] = exc
+
+        self.emit(ReplyStarted())
+        # The request runs on its own thread: on Windows, Ctrl+C cannot interrupt a blocking socket
+        # read, so a reply still waiting for its first token could not be cancelled otherwise.
+        thread = threading.Thread(target=work, name="zanbot-reply", daemon=True)
+        thread.start()
+        try:
+            self.wait_for(thread)
+        except KeyboardInterrupt:
+            # The abandoned thread stops at its next text chunk, or ends on its own timeout.
+            cancelled.set()
+            self.emit(ReplyFailed("Cancelled.", cancelled=True))
             return
+        if "crash" in outcome:
+            raise outcome["crash"]
+        if "error" in outcome:
+            self.emit(ReplyFailed(str(outcome["error"])))
+            return
+        answer, truncated = outcome["result"]
+        self.messages[:] = pending
         self.emit(ReplyFinished(answer, truncated))
         if self.worker is not None:
             self.worker.submit(self.config, text, answer)
             self.emit(StatusChanged())
+
+    def wait_for(self, thread):
+        # Short joins keep the main thread responsive to Ctrl+C.
+        while thread.is_alive():
+            thread.join(0.1)
 
     def system_prompt(self):
         memories = []

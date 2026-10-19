@@ -1,11 +1,12 @@
 from pathlib import Path
 import tempfile
+import threading
 import unittest
 from unittest.mock import Mock, patch
 
 import requests
 
-from test_chat import reply
+from test_chat import events_for, reply, wire_lines
 from zanbot.commands import COMMANDS
 from zanbot.config import Config
 from zanbot.memory import MemoryStore
@@ -106,6 +107,42 @@ class CommandTests(SessionTestCase):
         self.assertIn("#1 [profile] 用户名叫 Zhanbo", text)
         self.assertIn("Automatic memory is paused for this session.", text)
         self.assertFalse(worker.enabled)
+
+
+class CancelTests(SessionTestCase):
+    @patch("zanbot.llm.requests.post")
+    def test_ctrl_c_cancels_a_reply_still_waiting_for_text(self, post):
+        release = threading.Event()
+
+        def slow_lines(chunk_size=1):
+            release.wait(5)  # Like a server that has not sent its first token yet.
+            yield from wire_lines(events_for("迟到的回答"))
+
+        post.return_value = Mock(ok=True, iter_lines=slow_lines)
+        worker = Mock()
+        session = ChatSession(Config(api_key="k"), self.events.append,
+                              store=Mock(recall=Mock(return_value=[])), worker=worker)
+        with patch.object(ChatSession, "wait_for", side_effect=KeyboardInterrupt):
+            session.submit("你好")
+        self.assertEqual(self.events, [ReplyStarted(), ReplyFailed("Cancelled.", cancelled=True)])
+        release.set()
+        for thread in threading.enumerate():
+            if thread.name == "zanbot-reply":
+                thread.join(5)
+        # The abandoned request stops at its first chunk: nothing is shown or saved later.
+        self.assertEqual(self.events, [ReplyStarted(), ReplyFailed("Cancelled.", cancelled=True)])
+        self.assertEqual(session.messages, [])
+        worker.submit.assert_not_called()
+
+    def test_ctrl_c_during_a_command_is_reported(self):
+        with patch("zanbot.session.dispatch", side_effect=KeyboardInterrupt):
+            self.session.submit("/memory")
+        self.assertEqual(self.info_text(), "Cancelled.")
+
+    def test_unexpected_errors_reach_the_caller(self):
+        with patch("zanbot.session.run_turn", side_effect=RuntimeError("bug")), \
+                self.assertRaisesRegex(RuntimeError, "bug"):
+            self.session.submit("你好")
 
 
 class CloseTests(SessionTestCase):

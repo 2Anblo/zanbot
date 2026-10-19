@@ -54,7 +54,9 @@ Do not put your actual API key in project files.
 - `/remember [kind] <text>`: save a memory. Optional kind: profile, preference, project, event, relationship, or note (default).
 - `/forget <id>`: delete a memory and erase its text.
 - `/memory off` / `/memory on`: pause or resume automatic memory for this session.
-- `/exit`, Ctrl+C, or end of input: exit the application.
+- Ctrl+C while an answer is streaming (or still waiting for its first words): cancel that turn; nothing is saved and the prompt returns.
+- Ctrl+C while typing: clear the line. On an empty line, press Ctrl+C twice in a row to exit. With `--plain` or piped input, Ctrl+C at the prompt exits.
+- `/exit`, Ctrl+D, or end of input: exit the application.
 - Blank input is ignored, and failed requests are not saved to the history.
 - Unknown `/` commands are reported with a suggestion instead of being sent to the model. To send a message that starts with `/`, add a space before it.
 

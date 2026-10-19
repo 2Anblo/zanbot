@@ -1,6 +1,6 @@
 # 命令行体验与 session 核心层设计方案
 
-状态：C1、C2 已实现，C3 待实现。分支：`feature/cli-ux`。
+状态：C1、C2、C3 已实现。分支：`feature/cli-ux`。
 
 ## 目标
 
@@ -72,7 +72,7 @@ class ChatSession:
 
 **后台提示的变化。** `MemoryWorker` 新增一个可选回调 `on_notice`，session 把它接到 `emit(MemoryNotice(...))` 上。这样一来，前端可以在提示到达时**立即**显示（prompt_toolkit 能安全地在输入行上方打印），而不必在两次输入之间去拉取。`take_notices()` 继续保留，给 `input()` 的降级前端使用。
 
-**取消回答。** 前端捕获 Ctrl+C 后调用 `session.cancel()`，或者直接把 `KeyboardInterrupt` 交给 `submit()` 处理。session 关闭当前响应，emit `ReplyFailed(interrupted=True)`，然后回到提示符，**不退出程序**。历史不变，这一点和现在一样。
+**取消回答。** 实现时没有单独的 `cancel()`：`submit()` 自己处理 `KeyboardInterrupt`。请求放在单独的线程里执行，主线程每 0.1 秒 join 一次，所以随时能收到 Ctrl+C。之所以这样做，是因为在 Windows 上 Ctrl+C 打断不了阻塞中的 socket 读取，回答还在等第一个字时会按不动。取消后，session 立刻 emit `ReplyFailed(cancelled=True)` 并回到提示符；被丢下的线程会在下一个文本片段处停下（`on_text` 抛出 `ReplyCancelled`），或者等到自身超时结束。`run_turn` 只修改历史的副本，只有没被取消的轮次才会采用这份副本，所以取消后历史不变，也不会提交记忆提取任务。命令执行中按 Ctrl+C 会提示 `Cancelled.`。以后做 Web 端时，可以把同一个取消标志暴露成 `cancel()`。
 
 ## 命令注册表
 
@@ -156,7 +156,7 @@ class Command:
 
 1. ✅ **C1 抽出 session 和命令注册表（纯重构）**：仍然使用 `input()`，用户看到的行为不变，只多了 `/help` 和未知命令提示。这一步风险最低，测试也最容易补齐。
 2. ✅ **C2 接入 prompt_toolkit**：补全、状态栏、实时提示、输入历史、降级逻辑。
-3. **C3 按键细节**：Ctrl+C 取消回答。
+3. ✅ **C3 按键细节**：Ctrl+C 取消回答。
 
 ## 以后对接 Web 和桌面端
 

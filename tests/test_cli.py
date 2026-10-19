@@ -17,7 +17,8 @@ from zanbot.commands import COMMANDS, complete
 from zanbot.config import Config
 from zanbot.memory import MemoryStore
 from zanbot.memory_extract import MemoryWorker
-from zanbot.session import ChatSession, MemoryNotice, ReplyFinished, ReplyStarted, Status, StatusChanged
+from zanbot.session import (ChatSession, MemoryNotice, ReplyFailed, ReplyFinished, ReplyStarted, Status,
+                            StatusChanged)
 
 
 def texts(result):
@@ -136,6 +137,27 @@ class InteractiveTerminalTests(unittest.TestCase):
         post.return_value = reply()
         self.run_terminal("第一行\x1b\n第二行\r/exit\r")
         self.assertEqual(post.call_args.kwargs["json"]["messages"][0]["content"], "第一行\n第二行")
+
+    def test_ctrl_c_clears_typed_text(self, post, print_mock):
+        post.return_value = reply()
+        self.run_terminal("草稿\x03你好\r/exit\r")
+        self.assertEqual([c.kwargs["json"]["messages"][-1]["content"] for c in post.call_args_list], ["你好"])
+
+    def test_two_ctrl_c_on_an_empty_line_exit(self, post, print_mock):
+        terminal = self.run_terminal("\x03\x03")
+        post.assert_not_called()
+        self.assertFalse(terminal.exit_requested)  # Exited by Ctrl+C, not /exit.
+        print_mock.assert_any_call("\nGoodbye!")
+
+    def test_ctrl_c_presses_must_be_consecutive(self, post, print_mock):
+        # Empty line press, typing, clearing, then one empty-line press: not an exit yet.
+        post.return_value = reply()
+        self.run_terminal("\x03x\x03\x03你好\r/exit\r")
+        self.assertEqual(post.call_args.kwargs["json"]["messages"][-1]["content"], "你好")
+
+    def test_cancelled_reply_message(self, post, print_mock):
+        PlainTerminal().render(ReplyFailed("Cancelled.", cancelled=True))
+        print_mock.assert_called_once_with("\n(Cancelled. This turn was not saved.)")
 
     def test_history_is_saved_to_file(self, post, print_mock):
         with tempfile.TemporaryDirectory() as directory:

@@ -29,6 +29,8 @@ class PlainTerminal:
             print()
             if event.truncated:
                 print('(The response reached the output limit. You can type "continue".)')
+        elif isinstance(event, ReplyFailed) and event.cancelled:
+            print("\n(Cancelled. This turn was not saved.)")
         elif isinstance(event, ReplyFailed):
             print(f"\nRequest failed: {event.message}\n"
                   "This turn was not saved. Any text shown above may be incomplete. Please try again.")
@@ -60,6 +62,7 @@ class PlainTerminal:
 
 
 VK_RETURN = 13
+EXIT_HINT = " Press Ctrl+C again to exit (or Ctrl+D, /exit)."
 
 
 def windows_console_input():
@@ -113,6 +116,7 @@ class InteractiveTerminal(PlainTerminal):
         self.replying = False
         self.held = []
         self.lock = threading.Lock()
+        self.exit_armed = False
 
     def render(self, event):
         # Memory events can arrive on the worker thread. patch_stdout() prints them above the
@@ -182,6 +186,19 @@ class InteractiveTerminal(PlainTerminal):
         def _(event):
             event.current_buffer.insert_text("\n")
 
+        # Ctrl+C clears typed text. On an empty line, the first press shows a hint and a
+        # second press in a row exits; any other key in between starts over.
+        @bindings.add("c-c")
+        def _(event):
+            buffer = event.current_buffer
+            if buffer.text:
+                buffer.reset()
+                self.exit_armed = False
+            elif self.exit_armed and event.is_repeat:
+                event.app.exit(exception=EOFError())
+            else:
+                self.exit_armed = True
+
         history = InMemoryHistory()
         if self.history_path is not None:
             try:
@@ -189,16 +206,18 @@ class InteractiveTerminal(PlainTerminal):
                 history = FileHistory(str(self.history_path))
             except OSError:
                 print("Warning: Could not open the input history file. History is kept for this session only.")
-        return PromptSession(
+        prompt = PromptSession(
             history=history,
             completer=SlashCompleter(),
             # Popups only for commands, so they never interrupt ordinary (IME) typing.
             complete_while_typing=Condition(lambda: get_app().current_buffer.text.startswith("/")),
-            bottom_toolbar=lambda: self.status_text,
+            bottom_toolbar=lambda: EXIT_HINT if self.exit_armed else self.status_text,
             key_bindings=bindings,
             input=self.input,
             output=self.output,
         )
+        prompt.default_buffer.on_text_changed += lambda buffer: setattr(self, "exit_armed", False)
+        return prompt
 
     def run(self, config, store=None, worker=None):
         self.session = ChatSession(config, self.render, store, worker)
@@ -215,6 +234,7 @@ class InteractiveTerminal(PlainTerminal):
         with patch_stdout(raw=True):
             try:
                 while not self.exit_requested:
+                    self.exit_armed = False
                     text = prompt.prompt("\nYou: ")
                     self.session.submit(text)
                     self.refresh_status()
