@@ -108,7 +108,7 @@ class MemoryCliTests(TempStoreTest):
         with patch("zanbot.memory.memory_directory", return_value=self.home), \
                 patch("main.MemoryWorker", lambda store: MemoryWorker(store, extract_fn=fake_extract)), \
                 patch("builtins.input", side_effect=[*inputs, "/exit"]):
-            self.assertEqual(main(list(argv)), 0)
+            self.assertEqual(main(["--plain", *argv]), 0)
 
     def printed(self, print_mock):
         return "\n".join(" ".join(map(str, call.args)) for call in print_mock.call_args_list)
@@ -144,7 +144,7 @@ class MemoryCliTests(TempStoreTest):
         empty = self.home / "empty"
         with patch("zanbot.memory.memory_directory", return_value=empty), \
                 patch("builtins.input", side_effect=["/remember 用户养了一只猫", "你好", "/exit"]):
-            self.assertEqual(main(["--no-memory"]), 0)
+            self.assertEqual(main(["--no-memory", "--plain"]), 0)
         self.assertFalse(empty.exists())
         self.assertIn("Memory is off for this session.", self.printed(print_mock))
         self.assertNotIn("<memories>", post.call_args.kwargs["json"]["system"])
