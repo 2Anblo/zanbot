@@ -126,7 +126,7 @@ class StreamingTests(unittest.TestCase):
 
         config.return_value = self.config
         post.return_value = reply("Unique reply")
-        self.assertEqual(main(), 0)
+        self.assertEqual(main(["--no-memory"]), 0)
         output.assert_any_call("Unique reply", end="", flush=True)
         matching = [call for call in output.call_args_list if "Unique reply" in str(call)]
         self.assertEqual(len(matching), 1)

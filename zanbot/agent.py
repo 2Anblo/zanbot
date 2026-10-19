@@ -1,10 +1,10 @@
 from zanbot.llm import APIError, create_message
 
 
-def run_turn(messages, user_input, config, on_text=None):
+def run_turn(messages, user_input, config, on_text=None, system=None):
     # Update history only after success so failed inputs do not carry into later turns.
     pending = [*messages, {"role": "user", "content": user_input}]
-    response = create_message(pending, config, on_text)
+    response = create_message(pending, config, on_text, system)
     content = response.get("content") if isinstance(response, dict) else None
     if not isinstance(content, list) or not content or any(
         not isinstance(block, dict)

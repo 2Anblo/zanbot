@@ -10,15 +10,18 @@ class Config:
     max_tokens: int = 1024
     provider: str = "anthropic"
     session_id: str = field(default_factory=lambda: "zanbot-" + uuid.uuid4().hex)
+    # Model for background memory extraction; empty means the chat model.
+    memory_model: str = ""
 
 
 def load_config(provider=None, model=None):
     provider = provider or os.environ.get("ZANBOT_PROVIDER", "anthropic")
+    memory_model = os.environ.get("ZANBOT_MEMORY_MODEL", "").strip()
     if provider == "chatgpt":
         model = model or os.environ.get("CHATGPT_MODEL", "").strip()
         if not model:
             raise ValueError("Choose a ChatGPT model with --model. Use --models to list available models.")
-        return Config(api_key="", model=model, provider="chatgpt")
+        return Config(api_key="", model=model, provider="chatgpt", memory_model=memory_model)
     if provider != "anthropic":
         raise ValueError("ZANBOT_PROVIDER must be anthropic or chatgpt.")
     api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
@@ -27,4 +30,4 @@ def load_config(provider=None, model=None):
     model = model or os.environ.get("ANTHROPIC_MODEL", Config.model).strip()
     if not model:
         raise ValueError("ANTHROPIC_MODEL must not be empty.")
-    return Config(api_key=api_key, model=model)
+    return Config(api_key=api_key, model=model, memory_model=memory_model)
