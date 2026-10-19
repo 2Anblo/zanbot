@@ -48,6 +48,7 @@ $env:ANTHROPIC_API_KEY = [Environment]::GetEnvironmentVariable("ANTHROPIC_API_KE
 
 - 输入文字并回车，开始或继续对话。
 - 回答以流式方式逐段显示，无需等待整段生成完毕。
+- `/help`：列出所有命令。
 - `/clear`：清空历史，开始新对话。
 - `/memory`：列出已保存的长期记忆及其 ID。
 - `/remember [类别] <内容>`：保存一条记忆。类别可选 profile、preference、project、event、relationship，默认 note。
@@ -55,6 +56,7 @@ $env:ANTHROPIC_API_KEY = [Environment]::GetEnvironmentVariable("ANTHROPIC_API_KE
 - `/memory off` / `/memory on`：本次会话暂停或恢复自动记忆。
 - `/exit`、Ctrl+C 或输入结束：退出。
 - 空输入会被忽略；失败的请求不会写入历史。
+- 未知的 `/` 命令会提示可能想输入的命令，不会发给模型；要发送以 `/` 开头的消息，在前面加一个空格。
 
 历史仅保存在内存，退出后消失。每轮发送完整历史，因此长对话会增加输入 token 用量，并可能达到上下文上限；可用 `/clear` 重置。
 当前版本支持文本多轮对话和流式输出，尚未加入工具调用。
@@ -64,7 +66,10 @@ $env:ANTHROPIC_API_KEY = [Environment]::GetEnvironmentVariable("ANTHROPIC_API_KE
 
 ## 文件职责
 
-- `main.py`：终端交互。
+- `main.py`：命令行参数、登录相关操作和启动。
+- `zanbot/cli.py`：终端前端，读取输入并显示 session 事件。
+- `zanbot/session.py`：与界面无关的对话 session，以事件形式输出回答、命令结果和记忆提示。
+- `zanbot/commands.py`：`/` 命令注册表，供分发和 `/help` 使用。
 - `zanbot/config.py`：环境变量与配置。
 - `zanbot/llm.py`：HTTP 请求与错误处理。
 - `zanbot/streaming.py`：SSE 事件解析、文本增量回调和完整回答组装。

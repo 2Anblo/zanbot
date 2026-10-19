@@ -48,6 +48,7 @@ Do not put your actual API key in project files.
 
 - Enter a message and press Enter to start or continue a conversation.
 - Responses appear incrementally as text arrives, without waiting for the entire answer.
+- `/help`: list all commands.
 - `/clear`: clear the history and start a new conversation.
 - `/memory`: list saved long-term memories with their IDs.
 - `/remember [kind] <text>`: save a memory. Optional kind: profile, preference, project, event, relationship, or note (default).
@@ -55,6 +56,7 @@ Do not put your actual API key in project files.
 - `/memory off` / `/memory on`: pause or resume automatic memory for this session.
 - `/exit`, Ctrl+C, or end of input: exit the application.
 - Blank input is ignored, and failed requests are not saved to the history.
+- Unknown `/` commands are reported with a suggestion instead of being sent to the model. To send a message that starts with `/`, add a space before it.
 
 History is kept in memory and is lost when the application exits. Each turn sends the full history, so longer conversations use more input tokens and may reach the context limit. Use `/clear` to reset it.
 The current version supports multi-turn text conversations and streaming output. Tool calling is not yet implemented.
@@ -64,7 +66,10 @@ A turn is saved only after the complete ending event is received. If the stream 
 
 ## File responsibilities
 
-- `main.py`: terminal interaction.
+- `main.py`: command-line options, sign-in actions, and startup.
+- `zanbot/cli.py`: the terminal frontend that reads input and prints session events.
+- `zanbot/session.py`: a UI-independent chat session that emits events (reply text, command output, memory notices).
+- `zanbot/commands.py`: the slash command registry used for dispatch and `/help`.
 - `zanbot/config.py`: environment variables and configuration.
 - `zanbot/llm.py`: HTTP requests and error handling.
 - `zanbot/streaming.py`: SSE event parsing, text callbacks, and complete response assembly.
