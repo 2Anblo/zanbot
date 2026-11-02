@@ -105,7 +105,8 @@ def read_message(lines, on_text=None, on_event=None):
             if active_index is None or event.get("index") != active_index:
                 raise ValueError("The stream returned an unexpected block stop.")
             block = content[active_index]
-            if block["type"] == "tool_use" and tool_json:
+            # A tool without parameters arrives as a single empty fragment; keep its {} input then.
+            if block["type"] == "tool_use" and "".join(tool_json).strip():
                 try:
                     block["input"] = json.loads("".join(tool_json))
                 except ValueError:

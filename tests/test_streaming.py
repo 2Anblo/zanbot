@@ -199,6 +199,11 @@ class BlockParsingTests(unittest.TestCase):
         read_message(wire_lines(message(tool_block("{}"), stop="tool_use")), on_event=seen.append)
         self.assertEqual(seen, [{"type": "tool_use_start", "id": "toolu_1", "name": "list_dir"}])
 
+    def test_parameterless_tool_sends_one_empty_fragment(self):
+        # Seen from the real API: a tool without parameters streams partial_json "" once.
+        result = read_message(wire_lines(message(tool_block(""), stop="tool_use")))
+        self.assertEqual(result["content"][0]["input"], {})
+
     def test_invalid_tool_input_is_rejected(self):
         for fragments in (['{"path": '], ['["not", "an", "object"]']):
             with self.subTest(fragments=fragments):
@@ -233,7 +238,7 @@ class BlockParsingTests(unittest.TestCase):
         self.assertEqual([b["type"] for b in history[1]["content"]], ["thinking", "text"])
 
     @patch("zanbot.llm.requests.post")
-    def test_run_turn_rejects_tool_use_until_the_loop_exists(self, post):
+    def test_run_turn_rejects_tool_use_when_no_tools_were_offered(self, post):
         events = message(tool_block("{}"), stop="tool_use")
         post.return_value = Mock(ok=True, iter_lines=Mock(return_value=wire_lines(events)))
         history = []

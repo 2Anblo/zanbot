@@ -7,7 +7,8 @@ from dataclasses import dataclass, field
 class Config:
     api_key: str = field(repr=False)
     model: str = "claude-sonnet-4-5"
-    max_tokens: int = 1024
+    # Room for thinking and tool calls; a cut-off tool call cannot run.
+    max_tokens: int = 8192
     provider: str = "anthropic"
     session_id: str = field(default_factory=lambda: "zanbot-" + uuid.uuid4().hex)
     # Model for background memory extraction; empty means the chat model.

@@ -6,7 +6,7 @@ import sqlite3
 import threading
 import uuid
 
-from zanbot.agent import run_turn
+from zanbot.agent import NoHooks, effects_note, run_turn
 from zanbot.commands import dispatch
 from zanbot.llm import APIError
 from zanbot.prompts import build_system_prompt
@@ -75,12 +75,16 @@ class Status:
 class ChatSession:
     """Own the history, memory, and commands for one conversation."""
 
-    def __init__(self, config, emit, store=None, worker=None):
+    def __init__(self, config, emit, store=None, worker=None, tools=None):
         self.config = config
         self.emit = emit
         self.store = store
         self.worker = worker
+        self.tools = tools
         self.messages = []
+        # Side-effect calls from turns that failed or were cancelled, one list per turn.
+        # A cancelled turn's thread may still add to its list after the turn is abandoned.
+        self.unsaved_effects = []
 
     def info(self, *lines):
         if lines:
@@ -101,21 +105,38 @@ class ChatSession:
         except KeyboardInterrupt:
             self.info("Cancelled.")
 
+    def active_tools(self):
+        # Tools are Anthropic-only for now (roadmap N7).
+        return self.tools if self.config.provider == "anthropic" else None
+
     def reply(self, text):
         system = self.system_prompt()
+        tools = self.active_tools()
         # run_turn extends this copy only on success; it is adopted only if the turn was not cancelled.
         pending = list(self.messages)
         cancelled = threading.Event()
         outcome = {}
+        earlier = [call for calls in self.unsaved_effects for call in calls]
+        content = text
+        if earlier:
+            content = [{"type": "text", "text": effects_note(earlier)}, {"type": "text", "text": text}]
+        effects = []
+        self.unsaved_effects.append(effects)
 
         def on_text(chunk):
             if cancelled.is_set():
                 raise ReplyCancelled()
             self.emit(TextDelta(chunk))
 
+        class Hooks(NoHooks):
+            def check_cancelled(self):
+                if cancelled.is_set():
+                    raise ReplyCancelled()
+
         def work():
             try:
-                outcome["result"] = run_turn(pending, text, self.config, on_text=on_text, system=system)
+                outcome["result"] = run_turn(pending, content, self.config, on_text=on_text, system=system,
+                                             tools=tools, hooks=Hooks(), effects=effects)
             except ReplyCancelled:
                 pass
             except APIError as exc:
@@ -142,6 +163,8 @@ class ChatSession:
             return
         answer, truncated = outcome["result"]
         self.messages[:] = pending
+        # The note reached the model as part of a saved turn, so it is no longer needed.
+        self.unsaved_effects = []
         self.emit(ReplyFinished(answer, truncated))
         if self.worker is not None:
             self.worker.submit(self.config, text, answer)
@@ -163,7 +186,7 @@ class ChatSession:
             memory = "off"
         else:
             memory = "on" if self.worker is not None and self.worker.enabled else "paused"
-        return build_system_prompt(memories, date.today(), memory)
+        return build_system_prompt(memories, date.today(), memory, tools=self.active_tools() is not None)
 
     def clear(self):
         self.messages.clear()
