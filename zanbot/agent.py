@@ -17,16 +17,20 @@ _TAG = re.compile(r"<(/?)(tool_output)", re.IGNORECASE)
 
 
 DENIED = "The user did not allow this call. Do not retry it; continue without it or ask the user."
+CANNOT_ASK = ("Zanbot is running where it cannot ask the user for permission (--plain mode or piped input), "
+              "so this call was denied. Retrying will not help. Tell the user they can allow it by running "
+              "Zanbot in an interactive terminal without --plain.")
 
 
 class NoHooks:
-    """Default hooks: never cancelled, nothing to report, and no permission for side effects."""
+    """Default hooks: never cancelled, nothing to report, and no way to ask for permission."""
 
     def check_cancelled(self):
         pass
 
     def ask_permission(self, call):
-        return False
+        """Return True (allowed), False (the user said no), or None (there was no way to ask)."""
+        return None
 
     def on_tool_start(self, call):
         pass
@@ -90,8 +94,10 @@ def _validated(response, tools_allowed):
 def _run_tool(tools, call, hooks, effects):
     hooks.on_tool_start(call)
     side_effect = tools.has_side_effect(call["name"])
-    if side_effect and not hooks.ask_permission(call):
-        output, is_error = DENIED, True
+    allowed = hooks.ask_permission(call) if side_effect else True
+    if allowed is not True:
+        # Tell the model why, so it does not offer to retry something that cannot work.
+        output, is_error = (CANNOT_ASK if allowed is None else DENIED), True
     else:
         if side_effect and effects is not None:
             # Recorded before running: a call that fails partway may still have changed something.

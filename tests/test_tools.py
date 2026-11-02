@@ -155,9 +155,10 @@ class PermissionGateTests(unittest.TestCase):
         return post.call_args.kwargs["json"]["messages"][2]["content"][0], effects
 
     def test_denied_by_default(self, post):
+        # Default hooks have no way to ask, and the model is told so, not that the user refused.
         result, effects = self.turn(post)
         self.assertTrue(result["is_error"])
-        self.assertIn("did not allow", result["content"])
+        self.assertIn("cannot ask the user for permission", result["content"])
         self.assertFalse((self.notes / "a.md").exists())
         self.assertEqual(effects, [])
 

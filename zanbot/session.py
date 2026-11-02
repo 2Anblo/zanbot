@@ -156,9 +156,9 @@ class ChatSession:
                 if call["name"] in session.allowed_tools:
                     return True
                 if session.ask is None:
-                    session.info(f"{call['name']} needs your permission, which this terminal cannot ask "
-                                 "for, so it was denied. Use the interactive terminal to allow it.")
-                    return False
+                    session.info(f"({call['name']} was denied: this terminal cannot ask for permission. "
+                                 "Run Zanbot without --plain to allow it.)")
+                    return None
                 pending = {"call": call, "answered": threading.Event(), "allowed": False}
                 requests.put(pending)
                 while not pending["answered"].wait(0.1):
@@ -237,7 +237,11 @@ class ChatSession:
             memory = "off"
         else:
             memory = "on" if self.worker is not None and self.worker.enabled else "paused"
-        return build_system_prompt(memories, date.today(), memory, tools=self.active_tools() is not None)
+        if self.active_tools() is not None:
+            tools = True
+        else:
+            tools = "no-tools" if self.tools is None else "provider"
+        return build_system_prompt(memories, date.today(), memory, tools=tools)
 
     def clear(self):
         self.messages.clear()

@@ -10,7 +10,7 @@ from zanbot import agent
 from zanbot.agent import NoHooks, effects_note, run_turn
 from zanbot.config import Config
 from zanbot.llm import APIError
-from zanbot.prompts import TOOL_GUIDE
+from zanbot.prompts import MEMORY_GUIDE, MEMORY_OFF, MEMORY_PREAMBLE, NO_TOOLS, TOOL_GUIDE
 from zanbot.session import ChatSession, ReplyFailed, ReplyFinished, ReplyStarted
 
 
@@ -177,6 +177,28 @@ class LoopTests(unittest.TestCase):
     def test_silent_finish_after_tools_is_accepted(self, post):
         post.side_effect = [streamed(tool_block("{}"), stop="tool_use"), streamed(thinking_block("done"))]
         self.assertEqual(run_turn([], "Go", self.config, tools=FakeTools()), ("", False))
+
+
+class ToolPromptTests(unittest.TestCase):
+    def test_sessions_without_tools_say_so_and_why(self):
+        cases = ((Config(api_key="k"), None, "started with --no-tools"),
+                 (Config(api_key="", model="m", provider="chatgpt"), FakeTools(), "current provider"))
+        for config, tools, reason in cases:
+            with self.subTest(provider=config.provider):
+                prompt = ChatSession(config, lambda e: None, tools=tools).system_prompt()
+                self.assertIn(NO_TOOLS, prompt)
+                self.assertIn(reason, prompt)
+                self.assertNotIn(TOOL_GUIDE, prompt)
+
+    def test_sessions_with_tools_get_the_tool_guide_only(self):
+        prompt = ChatSession(Config(api_key="k"), lambda e: None, tools=FakeTools()).system_prompt()
+        self.assertIn(TOOL_GUIDE, prompt)
+        self.assertNotIn(NO_TOOLS, prompt)
+
+    def test_memory_is_never_called_notes(self):
+        # "notes" means the notes folder; using it for memory made a model blame --no-memory for missing files.
+        for text in (MEMORY_GUIDE, MEMORY_OFF, MEMORY_PREAMBLE):
+            self.assertNotIn(" notes ", text.replace("notes folder", ""))
 
 
 class EffectsNoteTests(unittest.TestCase):

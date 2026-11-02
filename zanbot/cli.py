@@ -19,13 +19,26 @@ class PlainTerminal:
 
     def __init__(self):
         self.exit_requested = False
+        self.mid_line = False  # A streaming reply has printed text without ending the line.
+
+    def end_line(self):
+        """Start a new line if a reply is partway through one, so other output does not join it."""
+        if self.mid_line:
+            print()
+            self.mid_line = False
 
     def render(self, event):
         if isinstance(event, ReplyStarted):
             print("\nZanbot: ", end="", flush=True)
-        elif isinstance(event, TextDelta):
+            self.mid_line = True
+            return
+        if isinstance(event, TextDelta):
             print(event.text, end="", flush=True)
-        elif isinstance(event, ReplyFinished):
+            if event.text:
+                self.mid_line = not event.text.endswith("\n")
+            return
+        was_mid_line, self.mid_line = self.mid_line, False
+        if isinstance(event, ReplyFinished):
             print()
             if event.truncated:
                 print('(The response reached the output limit. You can type "continue".)')
@@ -35,9 +48,13 @@ class PlainTerminal:
             print(f"\nRequest failed: {event.message}\n"
                   "This turn was not saved. Any text shown above may be incomplete. Please try again.")
         elif isinstance(event, Info):
+            if was_mid_line:
+                print()
             for line in event.lines:
                 print(line)
         elif isinstance(event, MemoryNotice):
+            if was_mid_line:
+                print()
             print(event.text)
         elif isinstance(event, Cleared):
             print("Conversation cleared.")
@@ -223,7 +240,7 @@ class InteractiveTerminal(PlainTerminal):
         """Ask whether a tool call may run; called on the main thread while a reply waits."""
         from prompt_toolkit import PromptSession
 
-        print()  # End any partly streamed line.
+        self.end_line()
         print(f"Zanbot wants to run {request.tool}({request.arguments})")
         # A plain prompt without history or completion; Ctrl+C cancels the whole turn.
         question = PromptSession(input=self.input, output=self.output)

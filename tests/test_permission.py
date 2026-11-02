@@ -10,9 +10,10 @@ from prompt_toolkit.output import DummyOutput
 
 from test_agent_loop import FakeTools, streamed
 from test_streaming import text_block, tool_block
-from zanbot.cli import InteractiveTerminal
+from zanbot.cli import InteractiveTerminal, PlainTerminal
 from zanbot.config import Config
-from zanbot.session import ChatSession, Info, PermissionRequest, ReplyFailed, ReplyFinished
+from zanbot.session import (ChatSession, Info, PermissionRequest, ReplyFailed, ReplyFinished, ReplyStarted,
+                            TextDelta)
 from zanbot.tools import default_tools
 
 
@@ -72,10 +73,13 @@ class SessionPermissionTests(unittest.TestCase):
 
     def test_frontend_that_cannot_ask_denies_and_says_why(self, post):
         tools = FakeTools()
-        self.turn(post, self.session(tools, ask=None))
+        result = self.turn(post, self.session(tools, ask=None))
         self.assertEqual(tools.calls, [])
+        # The model learns it cannot be asked here, so it does not offer to retry.
+        self.assertIn("Retrying will not help", result["content"])
+        self.assertNotIn("did not allow", result["content"])
         lines = [line for event in self.events if isinstance(event, Info) for line in event.lines]
-        self.assertTrue(any("write_note needs your permission" in line for line in lines))
+        self.assertTrue(any("write_note was denied: this terminal cannot ask" in line for line in lines))
 
     def test_ctrl_c_while_asking_cancels_the_turn(self, post):
         def interrupted(request):
@@ -100,6 +104,16 @@ class SessionPermissionTests(unittest.TestCase):
         self.session(FakeTools()).submit("Write")
         self.assertLessEqual(len(self.asked[0].arguments), 301)
         self.assertTrue(self.asked[0].arguments.endswith("…"))
+
+
+class LineBreakTests(unittest.TestCase):
+    @patch("builtins.print")
+    def test_info_during_a_reply_starts_on_its_own_line(self, print_mock):
+        terminal = PlainTerminal()
+        for event in (ReplyStarted(), Info(("(denied)",)), TextDelta("Ok"), TextDelta("\n"), Info(("next",))):
+            terminal.render(event)
+        self.assertEqual([c.args for c in print_mock.call_args_list],
+                         [("\nZanbot: ",), (), ("(denied)",), ("Ok",), ("\n",), ("next",)])
 
 
 @patch("builtins.print")
