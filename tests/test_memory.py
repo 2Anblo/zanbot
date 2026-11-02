@@ -269,6 +269,12 @@ class ExtractionTests(TempStoreTest):
         extract(self.store, Config(api_key="k", model="chat-model"), "你好", "你好")
         self.assertEqual(create.call_args.args[1].model, "chat-model")
 
+    @patch("zanbot.memory_extract.create_message")
+    def test_extract_ignores_thinking_blocks(self, create):
+        create.return_value = {"content": [{"type": "thinking", "thinking": "", "signature": "s"},
+                                           {"type": "text", "text": '{"ops": []}'}], "stop_reason": "end_turn"}
+        self.assertEqual(extract(self.store, Config(api_key="k"), "你好", "你好"), [])
+
 
 class WorkerTests(TempStoreTest):
     def test_jobs_run_in_order_and_close_waits(self):
