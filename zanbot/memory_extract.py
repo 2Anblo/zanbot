@@ -115,7 +115,8 @@ def extract(store, config, user_text, assistant_text, today=None):
     request = build_request(candidates, user_text, assistant_text, today)
     extract_config = replace(config, model=config.memory_model or config.model)
     response = create_message([{"role": "user", "content": request}], extract_config, system=EXTRACT_PROMPT)
-    text = "\n".join(block["text"] for block in response["content"])
+    # Skip thinking blocks, which newer models return alongside the text.
+    text = "\n".join(block["text"] for block in response["content"] if block.get("type") == "text")
     ops = parse_ops(text, {m.id for m in candidates})
     return store.apply_ops(ops, config.session_id)
 

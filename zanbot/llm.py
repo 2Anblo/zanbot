@@ -36,13 +36,25 @@ def server_error_hint(status, service):
     return None
 
 
-def create_message(messages, config, on_text=None, system=None):
+def create_message(messages, config, on_text=None, system=None, tools=None, tool_choice=None):
     if config.provider == "chatgpt":
         from zanbot.chatgpt import create_message as create_chatgpt_message
 
+        # Tools are not supported on this provider yet (roadmap N7).
         return create_chatgpt_message(messages, config, on_text, system)
 
     url = "https://api.anthropic.com/v1/messages"
+    body = {
+        "model": config.model,
+        "max_tokens": config.max_tokens,
+        "system": system or SYSTEM_PROMPT,
+        "messages": messages,
+        "stream": True,
+    }
+    if tools:
+        body["tools"] = tools
+    if tool_choice:
+        body["tool_choice"] = tool_choice
 
     try:
         response = post_with_retry(lambda: requests.post(
@@ -52,13 +64,7 @@ def create_message(messages, config, on_text=None, system=None):
                 "anthropic-version": "2023-06-01",
                 "content-type": "application/json",
             },
-            json={
-                "model": config.model,
-                "max_tokens": config.max_tokens,
-                "system": system or SYSTEM_PROMPT,
-                "messages": messages,
-                "stream": True,
-            },
+            json=body,
             stream=True,
             timeout=(10, 120),
         ))

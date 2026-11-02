@@ -62,7 +62,16 @@ $env:ANTHROPIC_API_KEY = [Environment]::GetEnvironmentVariable("ANTHROPIC_API_KE
 - 未知的 `/` 命令会提示可能想输入的命令，不会发给模型；要发送以 `/` 开头的消息，在前面加一个空格。
 
 历史仅保存在内存，退出后消失。每轮发送完整历史，因此长对话会增加输入 token 用量，并可能达到上下文上限；可用 `/clear` 重置。
-当前版本支持文本多轮对话和流式输出，尚未加入工具调用。
+当前版本支持文本多轮对话、流式输出和工具调用（仅 Anthropic provider）。
+
+## 工具
+
+在一轮回答里，模型可以调用工具、读取结果后继续，最多 10 步。目前有两个工具，都只能操作笔记目录 `%LOCALAPPDATA%/zanbot/notes/`（其他平台为 `~/.config/zanbot/notes/`）：
+
+- `list_dir`：列出文件和文件夹，无需确认。
+- `write_note`：向笔记追加文字，没有则新建。执行前 Zanbot 会显示这次调用并询问 `Allow? [y]es / [n]o / [a]lways this session`。`a` 表示在 `/clear` 或退出前都允许这个工具。在提问处按 Ctrl+C 会取消本轮。
+
+使用 `--plain` 或管道输入时无法询问，会改动内容的调用一律拒绝。如果某一轮在写入笔记后失败或被取消，下一条消息会告诉模型，避免它以为什么都没发生。使用 `--no-tools` 启动则不使用工具。详见 [agent loop 设计文档](docs/agent-loop.md)。
 
 长期记忆保存在 `%LOCALAPPDATA%/zanbot/memory.db`（其他平台为 `~/.config/zanbot/memory.db`），位于仓库之外，未加密。每轮会把当天日期和已保存的记忆（最多 2,000 字符，profile 优先）作为背景资料加入系统提示词。疑似密码、密钥或 token 的内容会被拒绝保存。每轮成功回答后，后台会再请求一次模型，判断要新增、更新或删除哪些关于你的长期信息；有变化时显示 `✓ Remembered #id`，可用 `/forget <id>` 撤销。提取每轮多一次请求，会计入用量；设置 `ZANBOT_MEMORY_MODEL` 可让提取改用更便宜的模型（默认与对话模型相同，provider 不变）。失败或中断的轮次不会提取，提取失败也不会影响对话。系统提示词里也会说明记忆的工作方式，以及当前是开启、暂停还是关闭，这样模型就不会自称“记住了”，也不会编造不存在的设置。使用 `--no-memory` 启动则完全不读写记忆。详见[记忆设计文档](docs/long-term-memory.md)。
 
@@ -94,7 +103,8 @@ $env:ANTHROPIC_API_KEY = [Environment]::GetEnvironmentVariable("ANTHROPIC_API_KE
 - `zanbot/config.py`：环境变量与配置。
 - `zanbot/llm.py`：HTTP 请求与错误处理。
 - `zanbot/streaming.py`：SSE 事件解析、文本增量回调和完整回答组装。
-- `zanbot/agent.py`：会话历史与单轮对话。
+- `zanbot/tools.py`：工具注册表、输入校验，以及 `list_dir` 和 `write_note`。
+- `zanbot/agent.py`：一轮对话：模型反复调用工具直到给出回答（agent loop）。
 - `zanbot/prompts.py`：系统提示词和记忆注入。
 - `zanbot/memory.py`：本地 SQLite 记忆存储、密钥过滤和召回。
 - `zanbot/memory_extract.py`：提取提示词、回复校验和后台线程。

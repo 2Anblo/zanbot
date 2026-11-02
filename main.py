@@ -6,6 +6,7 @@ from zanbot.cli import InteractiveTerminal, PlainTerminal
 from zanbot.config import load_config
 from zanbot.memory import MemoryStore, memory_directory
 from zanbot.memory_extract import MemoryWorker
+from zanbot.tools import default_tools
 
 
 def main(argv=None):
@@ -22,6 +23,7 @@ def main(argv=None):
     parser.add_argument("--no-memory", action="store_true", help="Do not read or write long-term memory")
     parser.add_argument("--no-history", action="store_true", help="Keep input history for this session only")
     parser.add_argument("--plain", action="store_true", help="Use simple line input without completion")
+    parser.add_argument("--no-tools", action="store_true", help="Answer without calling any tools")
     args = parser.parse_args([] if argv is None else argv)
     from zanbot.chatgpt_auth import AuthError, accounts, login, logout
     from filelock import Timeout
@@ -55,7 +57,8 @@ def main(argv=None):
         except (sqlite3.Error, OSError):
             print("Warning: Memory storage is unavailable. Continuing without memory.")
     worker = MemoryWorker(store) if store is not None else None
-    return choose_terminal(args).run(config, store, worker)
+    tools = None if args.no_tools else default_tools(memory_directory() / "notes")
+    return choose_terminal(args).run(config, store, worker, tools)
 
 
 def choose_terminal(args):

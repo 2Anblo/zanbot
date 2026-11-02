@@ -2,11 +2,13 @@
 
 from dataclasses import dataclass, replace
 from datetime import date
+import json
+import queue
 import sqlite3
 import threading
 import uuid
 
-from zanbot.agent import run_turn
+from zanbot.agent import NoHooks, effects_note, run_turn
 from zanbot.commands import dispatch
 from zanbot.llm import APIError
 from zanbot.prompts import build_system_prompt
@@ -64,6 +66,13 @@ class StatusChanged:
 
 
 @dataclass(frozen=True)
+class PermissionRequest:
+    """A tool call with side effects, waiting for the user's answer: "y", "n", or "a" (always, this session)."""
+    tool: str
+    arguments: str  # JSON, shortened for display
+
+
+@dataclass(frozen=True)
 class Status:
     provider: str
     model: str
@@ -75,12 +84,21 @@ class Status:
 class ChatSession:
     """Own the history, memory, and commands for one conversation."""
 
-    def __init__(self, config, emit, store=None, worker=None):
+    def __init__(self, config, emit, store=None, worker=None, tools=None, ask=None):
         self.config = config
         self.emit = emit
         self.store = store
         self.worker = worker
+        self.tools = tools
+        # ask(PermissionRequest) -> "y" | "n" | "a", called on the main thread. None: the frontend
+        # cannot ask (pipes, --plain), so calls with side effects are denied.
+        self.ask = ask
+        self.allowed_tools = set()  # Answered "a" (always) in this conversation.
+        self.permission_requests = None  # The current reply's queue; see wait_for().
         self.messages = []
+        # Side-effect calls from turns that failed or were cancelled, one list per turn.
+        # A cancelled turn's thread may still add to its list after the turn is abandoned.
+        self.unsaved_effects = []
 
     def info(self, *lines):
         if lines:
@@ -101,21 +119,59 @@ class ChatSession:
         except KeyboardInterrupt:
             self.info("Cancelled.")
 
+    def active_tools(self):
+        # Tools are Anthropic-only for now (roadmap N7).
+        return self.tools if self.config.provider == "anthropic" else None
+
     def reply(self, text):
         system = self.system_prompt()
+        tools = self.active_tools()
         # run_turn extends this copy only on success; it is adopted only if the turn was not cancelled.
         pending = list(self.messages)
         cancelled = threading.Event()
         outcome = {}
+        earlier = [call for calls in self.unsaved_effects for call in calls]
+        content = text
+        if earlier:
+            content = [{"type": "text", "text": effects_note(earlier)}, {"type": "text", "text": text}]
+        effects = []
+        self.unsaved_effects.append(effects)
 
         def on_text(chunk):
             if cancelled.is_set():
                 raise ReplyCancelled()
             self.emit(TextDelta(chunk))
 
+        # Each reply gets its own queue, so a cancelled reply's thread can never ask in a later turn.
+        requests = self.permission_requests = queue.Queue()
+        session = self
+
+        class Hooks(NoHooks):
+            def check_cancelled(self):
+                if cancelled.is_set():
+                    raise ReplyCancelled()
+
+            def ask_permission(self, call):
+                # Runs on the reply thread; the main thread asks the user in wait_for().
+                if call["name"] in session.allowed_tools:
+                    return True
+                if session.ask is None:
+                    session.info(f"({call['name']} was denied: this terminal cannot ask for permission. "
+                                 "Run Zanbot without --plain to allow it.)")
+                    return None
+                pending = {"call": call, "answered": threading.Event(), "allowed": False}
+                requests.put(pending)
+                while not pending["answered"].wait(0.1):
+                    if cancelled.is_set():
+                        raise ReplyCancelled()
+                if cancelled.is_set():
+                    raise ReplyCancelled()
+                return pending["allowed"]
+
         def work():
             try:
-                outcome["result"] = run_turn(pending, text, self.config, on_text=on_text, system=system)
+                outcome["result"] = run_turn(pending, content, self.config, on_text=on_text, system=system,
+                                             tools=tools, hooks=Hooks(), effects=effects)
             except ReplyCancelled:
                 pass
             except APIError as exc:
@@ -142,15 +198,33 @@ class ChatSession:
             return
         answer, truncated = outcome["result"]
         self.messages[:] = pending
+        # The note reached the model as part of a saved turn, so it is no longer needed.
+        self.unsaved_effects = []
         self.emit(ReplyFinished(answer, truncated))
         if self.worker is not None:
             self.worker.submit(self.config, text, answer)
             self.emit(StatusChanged())
 
     def wait_for(self, thread):
-        # Short joins keep the main thread responsive to Ctrl+C.
+        # Short joins keep the main thread responsive to Ctrl+C. Permission questions are asked
+        # here, so the terminal is only ever read from the main thread.
         while thread.is_alive():
             thread.join(0.1)
+            requests = self.permission_requests
+            while requests is not None and not requests.empty():
+                self.answer_permission(requests.get_nowait())
+
+    def answer_permission(self, pending):
+        call = pending["call"]
+        arguments = json.dumps(call["input"], ensure_ascii=False)
+        if len(arguments) > 300:
+            arguments = arguments[:300] + "…"
+        # Ctrl+C here propagates out of wait_for and cancels the turn; the reply thread sees it.
+        answer = self.ask(PermissionRequest(call["name"], arguments))
+        if answer == "a":
+            self.allowed_tools.add(call["name"])
+        pending["allowed"] = answer in ("y", "a")
+        pending["answered"].set()
 
     def system_prompt(self):
         memories = []
@@ -163,10 +237,15 @@ class ChatSession:
             memory = "off"
         else:
             memory = "on" if self.worker is not None and self.worker.enabled else "paused"
-        return build_system_prompt(memories, date.today(), memory)
+        if self.active_tools() is not None:
+            tools = True
+        else:
+            tools = "no-tools" if self.tools is None else "provider"
+        return build_system_prompt(memories, date.today(), memory, tools=tools)
 
     def clear(self):
         self.messages.clear()
+        self.allowed_tools.clear()
         self.config = replace(self.config, session_id="zanbot-" + uuid.uuid4().hex)
         self.emit(Cleared())
 

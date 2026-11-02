@@ -62,7 +62,16 @@ Do not put your actual API key in project files.
 - Unknown `/` commands are reported with a suggestion instead of being sent to the model. To send a message that starts with `/`, add a space before it.
 
 History is kept in memory and is lost when the application exits. Each turn sends the full history, so longer conversations use more input tokens and may reach the context limit. Use `/clear` to reset it.
-The current version supports multi-turn text conversations and streaming output. Tool calling is not yet implemented.
+The current version supports multi-turn text conversations, streaming output, and tool calling (Anthropic provider only).
+
+## Tools
+
+In one turn, the model can call tools, read their results, and continue, for up to 10 steps. Two tools are available, both limited to your notes folder, `%LOCALAPPDATA%/zanbot/notes/` (`~/.config/zanbot/notes/` elsewhere):
+
+- `list_dir`: list files and folders. Runs without asking.
+- `write_note`: append text to a note, creating it if needed. Zanbot first shows the call and asks `Allow? [y]es / [n]o / [a]lways this session`. `a` allows that tool until `/clear` or exit. Ctrl+C at the question cancels the turn.
+
+With `--plain` or piped input, Zanbot cannot ask, so calls that change anything are denied. If a turn fails or is cancelled after a note was written, the next message tells the model, so it does not assume nothing happened. Start with `--no-tools` to answer without tools. See the [agent loop design](docs/agent-loop.md).
 
 Long-term memories are stored in `%LOCALAPPDATA%/zanbot/memory.db` on Windows (`~/.config/zanbot/memory.db` elsewhere), outside this repository and unencrypted. Each turn adds today's date and the saved memories (up to 2,000 characters, profile first) to the system prompt as background data. Text that looks like a password, key, or token is refused. After each completed turn, a background request asks the model which durable facts about you to add, update, or delete; changes appear as a `✓ Remembered #id` line, undoable with `/forget <id>`. Extraction uses one extra request per turn, counted against your usage. Set `ZANBOT_MEMORY_MODEL` to use a cheaper model for it (default: the chat model, same provider). Failed or interrupted turns are never extracted, and extraction failures never interrupt chat. The system prompt also tells the model how this memory works (and whether it is on, paused, or off), so it does not promise to remember things or describe settings that do not exist. Start with `--no-memory` to neither read nor write memories. See the [memory design](docs/long-term-memory.md).
 
@@ -94,7 +103,8 @@ A turn is saved only after the complete ending event is received. If the stream 
 - `zanbot/config.py`: environment variables and configuration.
 - `zanbot/llm.py`: HTTP requests and error handling.
 - `zanbot/streaming.py`: SSE event parsing, text callbacks, and complete response assembly.
-- `zanbot/agent.py`: conversation history and individual turns.
+- `zanbot/tools.py`: the tool registry, input checks, and the `list_dir` and `write_note` tools.
+- `zanbot/agent.py`: one turn: the model calls tools until it answers (the agent loop).
 - `zanbot/prompts.py`: the system prompt and memory injection.
 - `zanbot/memory.py`: local SQLite memory storage, secret filtering, and recall.
 - `zanbot/memory_extract.py`: extraction prompt, reply validation, and the background worker.

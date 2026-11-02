@@ -70,7 +70,8 @@ def create_message(messages, config, on_text=None, system=None):
         inputs = []
         for message in messages:
             content = message["content"]
-            text = content if isinstance(content, str) else "\n".join(block["text"] for block in content)
+            text = content if isinstance(content, str) else "\n".join(
+                block["text"] for block in content if block.get("type") == "text")
             inputs.append({"role": message["role"], "content": text})
         with post_with_retry(lambda: requests.post(
             RESOURCE + "/responses",
