@@ -188,15 +188,16 @@ class EffectsNoteTests(unittest.TestCase):
 
 
 @patch("zanbot.llm.requests.post")
-# The session cannot ask for permission until N4, so these tests grant it to reach the side-effect paths.
-@patch.object(NoHooks, "ask_permission", lambda self, call: True)
 class SessionToolTests(unittest.TestCase):
     def setUp(self):
         self.events = []
 
     def session(self, tools, provider="anthropic"):
         config = Config(api_key="k", model="m", provider=provider)
-        return ChatSession(config, self.events.append, tools=tools)
+        session = ChatSession(config, self.events.append, tools=tools)
+        # As if the user had answered "always": these tests are about side effects, not asking.
+        session.allowed_tools.add("write_note")
+        return session
 
     def test_tools_are_sent_and_explained_in_the_system_prompt(self, post):
         post.return_value = streamed(text_block("Hi"))

@@ -219,8 +219,25 @@ class InteractiveTerminal(PlainTerminal):
         prompt.default_buffer.on_text_changed += lambda buffer: setattr(self, "exit_armed", False)
         return prompt
 
+    def ask_permission(self, request):
+        """Ask whether a tool call may run; called on the main thread while a reply waits."""
+        from prompt_toolkit import PromptSession
+
+        print()  # End any partly streamed line.
+        print(f"Zanbot wants to run {request.tool}({request.arguments})")
+        # A plain prompt without history or completion; Ctrl+C cancels the whole turn.
+        question = PromptSession(input=self.input, output=self.output)
+        while True:
+            try:
+                answer = question.prompt("Allow? [y]es / [n]o / [a]lways this session: ").strip().lower()
+            except EOFError:
+                return "n"
+            if answer in ("y", "yes", "n", "no", "a", "always"):
+                return answer[0]
+            print("Please answer y, n, or a.")
+
     def run(self, config, store=None, worker=None, tools=None):
-        self.session = ChatSession(config, self.render, store, worker, tools)
+        self.session = ChatSession(config, self.render, store, worker, tools, ask=self.ask_permission)
         try:
             prompt = self.build_prompt()
         except Exception:  # For example, no Windows console buffer under mintty or an IDE pane.
