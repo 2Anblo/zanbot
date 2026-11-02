@@ -44,8 +44,8 @@ class PlainTerminal:
         elif isinstance(event, ExitRequested):
             self.exit_requested = True
 
-    def run(self, config, store=None, worker=None):
-        session = ChatSession(config, self.render, store, worker)
+    def run(self, config, store=None, worker=None, tools=None):
+        session = ChatSession(config, self.render, store, worker, tools)
         print_banner(store)
         try:
             while not self.exit_requested:
@@ -219,13 +219,13 @@ class InteractiveTerminal(PlainTerminal):
         prompt.default_buffer.on_text_changed += lambda buffer: setattr(self, "exit_armed", False)
         return prompt
 
-    def run(self, config, store=None, worker=None):
-        self.session = ChatSession(config, self.render, store, worker)
+    def run(self, config, store=None, worker=None, tools=None):
+        self.session = ChatSession(config, self.render, store, worker, tools)
         try:
             prompt = self.build_prompt()
         except Exception:  # For example, no Windows console buffer under mintty or an IDE pane.
             print("This terminal does not support interactive input; using plain input instead.")
-            return PlainTerminal().run(config, store, worker)
+            return PlainTerminal().run(config, store, worker, tools)
         from prompt_toolkit.patch_stdout import patch_stdout
 
         self.session.live_notices()

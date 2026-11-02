@@ -1,6 +1,6 @@
 # Agent loop 与工具调用设计方案（N1–N4）
 
-状态：N1、N2 已实现（2026-11-02），N3、N4 待实现。第 5 节的决策全部选 A；实现时的调整见第 8 节。对应 [roadmap](roadmap.md) 第 2 节。
+状态：N1–N3 已实现（2026-11-02），N4 待实现。第 5 节的决策全部选 A；实现时的调整见第 8 节。对应 [roadmap](roadmap.md) 第 2 节。
 
 ## 1. 目标
 
@@ -211,4 +211,16 @@ class Tool:
 - **工具做完后模型可以不说话。** 第一步之后的回复允许没有文字（例如静默写完笔记），这时 answer 为空串；第一步就没有文字仍然报错。
 - **每次请求发送历史的快照**（`list(pending)`），因为循环会继续往 `pending` 里追加。
 - **工具接口**（N3 的注册表要实现）：`schemas()`、`execute(call) -> (text, is_error)`、`has_side_effect(name)`。`execute` 抛出的异常由循环转成 `is_error` 结果。
-- `ChatSession` 新增 `tools` 参数，目前 `main.py` 还没有传入，所以对用户来说行为不变，直到 N3 接上注册表。
+- `ChatSession` 新增 `tools` 参数（N3 已在 `main.py` 接上）。
+
+## 9. 实现记录（N3）
+
+- **`zanbot/tools.py`**：`Tool`、`ToolRegistry`、`ToolError` 和两个工具。`main.py` 默认启用，`--no-tools` 关闭。
+- **两个工具都限定在笔记目录**（`%LOCALAPPDATA%/zanbot/notes/`）：
+  - `list_dir`（`none`）：路径解析后必须仍在笔记目录内，`..`、绝对路径都会被拒绝；目录还不存在时返回 `(empty)`。
+  - `write_note`（`local`）：追加到一个笔记文件，没有就新建。文件名只允许字母、数字、空格和 `.-_`，不能带目录，不能以点开头、以点或空格结尾，也不能是 Windows 保留名（`con`、`nul` 等）；每次最多 20,000 字符。
+- **schema 校验是自己写的小子集**（object 的 `properties`、`required`、`additionalProperties: false`，以及 string / integer / boolean 类型），没有引入 `jsonschema` 依赖。注意 `true` 不算 integer。
+- **错误分两类**：`ToolError` 是给模型看的预期错误（如"没有这个目录"），原样返回；`OSError` 只返回系统的简短说明。两者都标 `is_error`，这一轮继续。
+- **把 N4 的"默认拒绝"提前做了。** 循环里，有副作用的调用先问 `hooks.ask_permission(call)`，`NoHooks` 一律返回 False。这样 N3 接上 `write_note` 时也不会出现"不问就写"的窗口期；被拒绝的调用不计入 D1 的副作用记录。N4 只需实现真正去问用户的那部分。
+- **真实 API 验证**：通过 CLI 让模型"先列出笔记目录，再写 todo.md"。`list_dir` 返回空，`write_note` 被拒绝，模型如实告诉用户没有保存，磁盘上也没有创建任何文件。
+- 目前 CLI 不显示工具调用过程（N6），只看得到最终回答。

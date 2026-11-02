@@ -7,7 +7,7 @@ import requests
 from test_chat import wire_lines
 from test_streaming import message, text_block, thinking_block, tool_block
 from zanbot import agent
-from zanbot.agent import effects_note, run_turn
+from zanbot.agent import NoHooks, effects_note, run_turn
 from zanbot.config import Config
 from zanbot.llm import APIError
 from zanbot.prompts import TOOL_GUIDE
@@ -16,6 +16,13 @@ from zanbot.session import ChatSession, ReplyFailed, ReplyFinished, ReplyStarted
 
 def streamed(*blocks, stop="end_turn"):
     return Mock(ok=True, iter_lines=Mock(return_value=wire_lines(message(*blocks, stop=stop))))
+
+
+class AllowAll(NoHooks):
+    """Hooks that grant every permission, for tests about the loop rather than about permission."""
+
+    def ask_permission(self, call):
+        return True
 
 
 class FakeTools:
@@ -85,7 +92,7 @@ class LoopTests(unittest.TestCase):
         post.side_effect = [streamed(tool_block('{"n": 1}', id="t1"), tool_block('{"n": 2}', name="write_note", id="t2"),
                                      stop="tool_use"), streamed(text_block("Done"))]
         tools = FakeTools()
-        run_turn([], "Go", self.config, tools=tools)
+        run_turn([], "Go", self.config, tools=tools, hooks=AllowAll())
         self.assertEqual(tools.calls, [("list_dir", {"n": 1}), ("write_note", {"n": 2})])
         results = self.sent(post)["messages"][2]["content"]
         self.assertEqual([r["tool_use_id"] for r in results], ["t1", "t2"])
@@ -137,7 +144,7 @@ class LoopTests(unittest.TestCase):
                                      stop="tool_use"), requests.ConnectionError()]
         history, effects = [], []
         with self.assertRaises(APIError):
-            run_turn(history, "Go", self.config, tools=FakeTools(), effects=effects)
+            run_turn(history, "Go", self.config, tools=FakeTools(), hooks=AllowAll(), effects=effects)
         self.assertEqual(history, [])
         self.assertEqual([c["name"] for c in effects], ["write_note"])
 
@@ -181,6 +188,8 @@ class EffectsNoteTests(unittest.TestCase):
 
 
 @patch("zanbot.llm.requests.post")
+# The session cannot ask for permission until N4, so these tests grant it to reach the side-effect paths.
+@patch.object(NoHooks, "ask_permission", lambda self, call: True)
 class SessionToolTests(unittest.TestCase):
     def setUp(self):
         self.events = []

@@ -16,11 +16,17 @@ STEP_LIMIT_NOTE = ("[Zanbot] The tool call limit for this turn has been reached.
 _TAG = re.compile(r"<(/?)(tool_output)", re.IGNORECASE)
 
 
+DENIED = "The user did not allow this call. Do not retry it; continue without it or ask the user."
+
+
 class NoHooks:
-    """Default hooks: never cancelled, nothing to report."""
+    """Default hooks: never cancelled, nothing to report, and no permission for side effects."""
 
     def check_cancelled(self):
         pass
+
+    def ask_permission(self, call):
+        return False
 
     def on_tool_start(self, call):
         pass
@@ -83,13 +89,17 @@ def _validated(response, tools_allowed):
 
 def _run_tool(tools, call, hooks, effects):
     hooks.on_tool_start(call)
-    if effects is not None and tools.has_side_effect(call["name"]):
-        # Recorded before running: a call that fails partway may still have changed something.
-        effects.append(call)
-    try:
-        output, is_error = tools.execute(call)
-    except Exception as exc:  # A broken tool is reported to the model, not to the user.
-        output, is_error = f"The tool failed: {exc}", True
+    side_effect = tools.has_side_effect(call["name"])
+    if side_effect and not hooks.ask_permission(call):
+        output, is_error = DENIED, True
+    else:
+        if side_effect and effects is not None:
+            # Recorded before running: a call that fails partway may still have changed something.
+            effects.append(call)
+        try:
+            output, is_error = tools.execute(call)
+        except Exception as exc:  # A broken tool is reported to the model, not to the user.
+            output, is_error = f"The tool failed: {exc}", True
     result = {"type": "tool_result", "tool_use_id": call["id"], "content": format_result(str(output))}
     if is_error:
         result["is_error"] = True
