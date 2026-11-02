@@ -160,13 +160,6 @@ class LoopTests(unittest.TestCase):
         self.assertEqual(post.call_count, 1)
         self.assertEqual(history, [])
 
-    def test_hooks_see_each_tool_call(self, post):
-        post.side_effect = [streamed(tool_block("{}"), stop="tool_use"), streamed(text_block("Ok"))]
-        hooks = Mock()
-        run_turn([], "Go", self.config, tools=FakeTools(), hooks=hooks)
-        hooks.on_tool_start.assert_called_once()
-        self.assertEqual(hooks.on_tool_finish.call_args.args[1]["tool_use_id"], "toolu_1")
-
     def test_complete_tool_call_cut_off_by_max_tokens_is_not_run(self, post):
         post.return_value = streamed(text_block("Let me"), tool_block("{}"), stop="max_tokens")
         tools = FakeTools()

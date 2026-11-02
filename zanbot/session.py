@@ -66,6 +66,43 @@ class StatusChanged:
 
 
 @dataclass(frozen=True)
+class ToolStarted:
+    tool: str
+    arguments: str  # JSON, shortened for display
+
+
+@dataclass(frozen=True)
+class ToolFinished:
+    tool: str
+    ok: bool
+    summary: str  # One short line about the output
+
+
+@dataclass(frozen=True)
+class ToolDenied:
+    tool: str
+    arguments: str
+    asked: bool  # True: the user said no. False: this frontend cannot ask, so it was denied.
+
+
+def shorten(text, limit):
+    return text if len(text) <= limit else text[:limit] + "…"
+
+
+def preview(arguments, limit=300):
+    return shorten(json.dumps(arguments, ensure_ascii=False), limit)
+
+
+def summarize(output, limit=80):
+    """One line about a tool's output: its first line, and how many lines there were."""
+    lines = output.strip().splitlines()
+    if not lines:
+        return "(no output)"
+    first = shorten(lines[0].strip(), limit)
+    return first if len(lines) == 1 else f"{first} … ({len(lines)} lines)"
+
+
+@dataclass(frozen=True)
 class PermissionRequest:
     """A tool call with side effects, waiting for the user's answer: "y", "n", or "a" (always, this session)."""
     tool: str
@@ -156,9 +193,7 @@ class ChatSession:
                 if call["name"] in session.allowed_tools:
                     return True
                 if session.ask is None:
-                    session.info(f"({call['name']} was denied: this terminal cannot ask for permission. "
-                                 "Run Zanbot without --plain to allow it.)")
-                    return None
+                    return None  # Shown to the user by on_tool_denied.
                 pending = {"call": call, "answered": threading.Event(), "allowed": False}
                 requests.put(pending)
                 while not pending["answered"].wait(0.1):
@@ -167,6 +202,19 @@ class ChatSession:
                 if cancelled.is_set():
                     raise ReplyCancelled()
                 return pending["allowed"]
+
+            # Tool events are dropped once the turn is cancelled, so an abandoned thread prints nothing.
+            def on_tool_start(self, call):
+                if not cancelled.is_set():
+                    session.emit(ToolStarted(call["name"], preview(call["input"], 80)))
+
+            def on_tool_finish(self, call, output, is_error):
+                if not cancelled.is_set():
+                    session.emit(ToolFinished(call["name"], not is_error, summarize(output)))
+
+            def on_tool_denied(self, call, asked):
+                if not cancelled.is_set():
+                    session.emit(ToolDenied(call["name"], preview(call["input"], 80), asked))
 
         def work():
             try:
@@ -216,11 +264,8 @@ class ChatSession:
 
     def answer_permission(self, pending):
         call = pending["call"]
-        arguments = json.dumps(call["input"], ensure_ascii=False)
-        if len(arguments) > 300:
-            arguments = arguments[:300] + "…"
         # Ctrl+C here propagates out of wait_for and cancels the turn; the reply thread sees it.
-        answer = self.ask(PermissionRequest(call["name"], arguments))
+        answer = self.ask(PermissionRequest(call["name"], preview(call["input"])))
         if answer == "a":
             self.allowed_tools.add(call["name"])
         pending["allowed"] = answer in ("y", "a")

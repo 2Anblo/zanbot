@@ -13,7 +13,7 @@ from test_streaming import text_block, tool_block
 from zanbot.cli import InteractiveTerminal, PlainTerminal
 from zanbot.config import Config
 from zanbot.session import (ChatSession, Info, PermissionRequest, ReplyFailed, ReplyFinished, ReplyStarted,
-                            TextDelta)
+                            TextDelta, ToolDenied)
 from zanbot.tools import default_tools
 
 
@@ -78,8 +78,7 @@ class SessionPermissionTests(unittest.TestCase):
         # The model learns it cannot be asked here, so it does not offer to retry.
         self.assertIn("Retrying will not help", result["content"])
         self.assertNotIn("did not allow", result["content"])
-        lines = [line for event in self.events if isinstance(event, Info) for line in event.lines]
-        self.assertTrue(any("write_note was denied: this terminal cannot ask" in line for line in lines))
+        self.assertIn(ToolDenied("write_note", '{"name": "a.md", "text": "hi"}', asked=False), self.events)
 
     def test_ctrl_c_while_asking_cancels_the_turn(self, post):
         def interrupted(request):

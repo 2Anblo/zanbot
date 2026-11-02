@@ -71,6 +71,8 @@ $env:ANTHROPIC_API_KEY = [Environment]::GetEnvironmentVariable("ANTHROPIC_API_KE
 - `list_dir`：列出文件和文件夹，无需确认。
 - `write_note`：向笔记追加文字，没有则新建。执行前 Zanbot 会显示这次调用并询问 `Allow? [y]es / [n]o / [a]lways this session`。`a` 表示在 `/clear` 或退出前都允许这个工具。在提问处按 Ctrl+C 会取消本轮。
 
+每次调用都会在回答的各步之间显示一行缩进：开始时显示 `→ list_dir({"path": "."})`，结束后显示 `✓` 或 `✗` 和结果的第一行。通过管道输入或输出时，Zanbot 使用 UTF-8 读写。
+
 使用 `--plain` 或管道输入时无法询问，会改动内容的调用一律拒绝。如果某一轮在写入笔记后失败或被取消，下一条消息会告诉模型，避免它以为什么都没发生。使用 `--no-tools` 启动则不使用工具。详见 [agent loop 设计文档](docs/agent-loop.md)。
 
 长期记忆保存在 `%LOCALAPPDATA%/zanbot/memory.db`（其他平台为 `~/.config/zanbot/memory.db`），位于仓库之外，未加密。每轮会把当天日期和已保存的记忆（最多 2,000 字符，profile 优先）作为背景资料加入系统提示词。疑似密码、密钥或 token 的内容会被拒绝保存。每轮成功回答后，后台会再请求一次模型，判断要新增、更新或删除哪些关于你的长期信息；有变化时显示 `✓ Remembered #id`，可用 `/forget <id>` 撤销。提取每轮多一次请求，会计入用量；设置 `ZANBOT_MEMORY_MODEL` 可让提取改用更便宜的模型（默认与对话模型相同，provider 不变）。失败或中断的轮次不会提取，提取失败也不会影响对话。系统提示词里也会说明记忆的工作方式，以及当前是开启、暂停还是关闭，这样模型就不会自称“记住了”，也不会编造不存在的设置。使用 `--no-memory` 启动则完全不读写记忆。详见[记忆设计文档](docs/long-term-memory.md)。
