@@ -241,3 +241,21 @@ class Tool:
 - **提示行另起一行。** 回复流式输出到一半时出现的提示（如拒绝说明、权限问题）原来会接在 `Zanbot:` 后面；终端现在记录"当前行是否还没结束"，需要时先换行。
 - **没有工具时也告诉模型，并说明原因。** 原来关闭工具时 system prompt 里什么都不提，模型被问到笔记目录时编了个原因（说是 `--no-memory` 导致的）。现在会写明"本次没有工具，看不到也改不了文件"，并按情况说明是 `--no-tools` 还是 provider 不支持。
 - **长期记忆不再叫 "notes"。** 记忆说明里原来把记忆叫 notes，和笔记目录撞名，是上面那次误解的另一半原因。现在统一叫 memories，并写明记忆不是文件、和笔记目录无关。
+
+## 12. N6：在终端显示工具调用（2026-11-02）
+
+- **钩子分三种**：`on_tool_start(call)` 只在工具真正执行时调用（权限通过之后）；`on_tool_finish(call, output, is_error)` 拿到包装和截断之前的原始输出；`on_tool_denied(call, asked)` 区分"用户拒绝"和"没法问"。被拒绝的调用不会触发 start / finish。
+- **会话事件**：`ToolStarted(tool, arguments)`、`ToolFinished(tool, ok, summary)`、`ToolDenied(tool, arguments, asked)`。参数预览 80 字符；摘要是输出的第一行加行数，例如 `ideas.md … (3 lines)`。取消之后的工具事件会被丢弃，被放弃的线程不会再往屏幕上打印。原来 plain 模式下的拒绝提示（Info）改由 `ToolDenied` 显示。
+- **终端显示**：
+
+  ```
+  Zanbot: 我来帮你先查看笔记目录……
+    → list_dir({"path": "."})
+      ✓ ideas.md … (3 lines)
+  好的，你的笔记目录中有以下文件：……
+    ✗ write_note was denied: this terminal cannot ask for permission. …
+  ```
+
+  工具行之前如果当前行没结束会先换行；工具行之后，下一步开头的那个换行会被去掉，避免多出空行。
+- **顺带修掉的编码问题（真实运行时发现）**：Windows 上 stdin / stdout 接管道时，Python 默认用 cp1252。PowerShell 管道送进来的是带 BOM 的 UTF-8，中文被解成乱码，其中无效字符让 API 返回 400；打印 `→` 则直接让程序崩溃（记忆提示里的 `✓` 也有同样隐患）。现在 `main.py` 启动时，凡是接管道或文件的流都改用 UTF-8（输入用 `utf-8-sig` 去掉 BOM，无法编码的字符替换而不报错）；控制台不受影响。
+- 没做：状态栏显示"第 n 步"。目前每次调用都有一行，暂时够用。

@@ -9,6 +9,21 @@ from zanbot.memory_extract import MemoryWorker
 from zanbot.tools import default_tools
 
 
+def use_utf8_for_pipes(stdin, stdout, stderr):
+    """Read and write UTF-8 when a stream is a pipe or file rather than a console.
+
+    On Windows, Python otherwise uses the legacy code page (such as cp1252) for pipes: Chinese text
+    piped in arrives garbled, with invalid characters the API rejects, and printing a symbol such as
+    "→" crashes. Consoles are left alone; Python already writes Unicode to them.
+    """
+    if not stdin.isatty():
+        # utf-8-sig also drops the byte order mark PowerShell puts in front of piped text.
+        stdin.reconfigure(encoding="utf-8-sig", errors="replace")
+    for stream in (stdout, stderr):
+        if not stream.isatty():
+            stream.reconfigure(encoding="utf-8", errors="replace")
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(description="Zanbot streaming chat")
     parser.add_argument("--provider", choices=["anthropic", "chatgpt"])
@@ -69,4 +84,5 @@ def choose_terminal(args):
 
 
 if __name__ == "__main__":
+    use_utf8_for_pipes(sys.stdin, sys.stdout, sys.stderr)
     raise SystemExit(main(sys.argv[1:]))

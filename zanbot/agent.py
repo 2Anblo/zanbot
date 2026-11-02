@@ -33,10 +33,13 @@ class NoHooks:
         return None
 
     def on_tool_start(self, call):
-        pass
+        """A tool is about to run (after any permission was granted)."""
 
-    def on_tool_finish(self, call, result):
-        pass
+    def on_tool_finish(self, call, output, is_error):
+        """A tool that started has finished; output is its raw text, before wrapping or truncation."""
+
+    def on_tool_denied(self, call, asked):
+        """A call was not run: the user said no (asked=True), or there was no way to ask."""
 
 
 def text_of(content):
@@ -92,24 +95,26 @@ def _validated(response, tools_allowed):
 
 
 def _run_tool(tools, call, hooks, effects):
-    hooks.on_tool_start(call)
     side_effect = tools.has_side_effect(call["name"])
     allowed = hooks.ask_permission(call) if side_effect else True
     if allowed is not True:
         # Tell the model why, so it does not offer to retry something that cannot work.
         output, is_error = (CANNOT_ASK if allowed is None else DENIED), True
+        hooks.on_tool_denied(call, allowed is False)
     else:
         if side_effect and effects is not None:
             # Recorded before running: a call that fails partway may still have changed something.
             effects.append(call)
+        hooks.on_tool_start(call)
         try:
             output, is_error = tools.execute(call)
         except Exception as exc:  # A broken tool is reported to the model, not to the user.
             output, is_error = f"The tool failed: {exc}", True
-    result = {"type": "tool_result", "tool_use_id": call["id"], "content": format_result(str(output))}
+        output = str(output)
+        hooks.on_tool_finish(call, output, is_error)
+    result = {"type": "tool_result", "tool_use_id": call["id"], "content": format_result(output)}
     if is_error:
         result["is_error"] = True
-    hooks.on_tool_finish(call, result)
     return result
 
 

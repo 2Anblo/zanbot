@@ -5,7 +5,20 @@ import threading
 
 from zanbot.commands import WAIT_SECONDS, complete
 from zanbot.session import (ChatSession, Cleared, ExitRequested, Info, MemoryNotice, ReplyFailed,
-                            ReplyFinished, ReplyStarted, StatusChanged, TextDelta)
+                            ReplyFinished, ReplyStarted, StatusChanged, TextDelta, ToolDenied, ToolFinished,
+                            ToolStarted)
+
+
+def tool_line(event):
+    """One indented line for a tool event, shown between the steps of a reply."""
+    if isinstance(event, ToolStarted):
+        return f"  → {event.tool}({event.arguments})"
+    if isinstance(event, ToolFinished):
+        return f"    {'✓' if event.ok else '✗'} {event.summary}"
+    if event.asked:
+        return f"  ✗ {event.tool}: not allowed"
+    return (f"  ✗ {event.tool} was denied: this terminal cannot ask for permission. "
+            "Run Zanbot without --plain to allow it.")
 
 
 def print_banner(store):
@@ -20,6 +33,8 @@ class PlainTerminal:
     def __init__(self):
         self.exit_requested = False
         self.mid_line = False  # A streaming reply has printed text without ending the line.
+        # A tool line was just printed, so the line break that starts the next step is not needed.
+        self.after_tool_line = False
 
     def end_line(self):
         """Start a new line if a reply is partway through one, so other output does not join it."""
@@ -33,11 +48,21 @@ class PlainTerminal:
             self.mid_line = True
             return
         if isinstance(event, TextDelta):
-            print(event.text, end="", flush=True)
-            if event.text:
-                self.mid_line = not event.text.endswith("\n")
+            text = event.text
+            if self.after_tool_line and text:
+                text = text.removeprefix("\n")
+                self.after_tool_line = False
+            if text:
+                print(text, end="", flush=True)
+                self.mid_line = not text.endswith("\n")
+            return
+        if isinstance(event, (ToolStarted, ToolFinished, ToolDenied)):
+            self.end_line()
+            print(tool_line(event))
+            self.after_tool_line = True
             return
         was_mid_line, self.mid_line = self.mid_line, False
+        self.after_tool_line = False
         if isinstance(event, ReplyFinished):
             print()
             if event.truncated:
