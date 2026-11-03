@@ -43,13 +43,13 @@ class MemoryToolTests(unittest.TestCase):
     def test_forget(self):
         memory_id = self.store.add("用户养了一只猫")
         self.assertEqual(self.registry.describe(call("forget", id=memory_id)),
-                         f"forget memory #{memory_id}: 用户养了一只猫")
+                         f"memory #{memory_id}: 用户养了一只猫")
         self.assertEqual(self.registry.execute(call("forget", id=memory_id)), (f"Forgot #{memory_id}.", False))
         self.assertEqual(self.store.active(), [])
         output, is_error = self.registry.execute(call("forget", id=memory_id))
         self.assertTrue(is_error)
         self.assertIn("No active memory has ID", output)
-        self.assertEqual(self.registry.describe(call("forget", id=999)), "forget memory #999 (not found)")
+        self.assertEqual(self.registry.describe(call("forget", id=999)), "memory #999, which does not exist")
 
     def test_permissions(self):
         self.assertFalse(self.registry.needs_permission("remember"))
@@ -87,7 +87,7 @@ class MemoryPromptWithToolsTests(unittest.TestCase):
         post.side_effect = [streamed(tool_block('{"id": %d}' % self.memory_id, name="forget"), stop="tool_use"),
                             streamed(text_block("Ok"))]
         session.submit("忘掉猫的事")
-        self.assertEqual(asked[0].arguments, f"forget memory #{self.memory_id}: 用户养了一只猫")
+        self.assertEqual(asked[0].arguments, f"memory #{self.memory_id}: 用户养了一只猫")
         self.assertEqual(len(self.store.active()), 1)  # Answered "n".
 
 

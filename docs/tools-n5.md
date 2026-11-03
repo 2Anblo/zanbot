@@ -1,6 +1,6 @@
 # 正式工具集设计方案（N5）
 
-状态：设计已定（2026-11-02），第 4 节的决策全部选 A，实现中。对应 [roadmap](roadmap.md) 第 2 节 N5，建立在 [agent loop](agent-loop.md) 的 N1–N4、N6 之上。
+状态：已实现（2026-11-02）。第 4 节的决策全部选 A；实现记录见第 6 节。对应 [roadmap](roadmap.md) 第 2 节 N5，建立在 [agent loop](agent-loop.md) 的 N1–N4、N6 之上。
 
 ## 1. 目标
 
@@ -101,3 +101,18 @@
 - **web_fetch**：拒绝 `file://`、localhost、内网 IP（含跳转之后的地址）；HTML 转文本；网页里的"忽略之前的指令"按数据处理。
 - **记忆工具**：`remember` 后出现在 `/memory` 里，可以 `/forget`；`forget` 需要确认。
 - **手动验证**：真实 API 下各跑一个典型任务。
+
+## 6. 实现记录
+
+分四次提交：文件工具与工作区、`run_shell`、`web_fetch`、记忆工具。
+
+- **权限分级**：`Tool` 新增 `permission`：`none`（不问）、`ask`（问，可选 `a`）、`ask_each_time`（每次问，不提供 `a`）。默认值由 `side_effect` 推出。会话层也做了兜底：即使前端返回 `a`，对 `ask_each_time` 的工具也按拒绝处理，不会记住。
+- **副作用和权限分开**：`remember` 有副作用（轮次失败时会告诉模型），但按 E4 不需要确认，所以循环改用 `needs_permission` 决定是否问，用 `has_side_effect` 决定是否记录。
+- **确认时显示人能看懂的说明**：工具可以提供 `describe`；`forget` 的确认会显示 `memory #12: 记忆原文`，而不是 `{"id": 12}`。
+- **文件工具**：`write_note` 已删除。`read_file` 默认 400 行，可用 `offset` / `limit`；超过 5 MB 或前 8 KB 有空字节（二进制）就拒绝。`write_file` / `edit_file` 按原样写入，不转换换行符，Windows 的 `\r\n` 会保留。工作区不存在时，`--workspace` 报错退出；默认的笔记目录会自动创建。
+- **`run_shell`**：Windows 下用 `powershell -NoProfile -NonInteractive`，并先把输出编码设成 UTF-8；没有标准输入；30 秒后用 `taskkill /T` 结束整个进程树。退出码非 0 时标为错误，但输出照样返回给模型。
+- **`web_fetch`**：不自动跟随跳转，而是每一跳都先检查地址；只要域名解析出的地址里有一个不是公网地址，就拒绝（含 IPv4 映射的 IPv6）。只读文本类内容；字符集优先用响应头，其次是网页里的 `<meta charset>`，最后用 UTF-8（requests 对没声明字符集的文本默认用 ISO-8859-1，中文会乱码）。
+  - 已知局限：先解析检查、再由 requests 连接，中间如果 DNS 结果变了（DNS rebinding），检查会被绕过。彻底解决要把连接绑定到检查过的 IP，留到 S 阶段。
+- **记忆工具**：只在记忆开启时提供。有记忆工具时，system prompt 换用 `MEMORY_GUIDE_TOOLS`（用户明确要求时才用工具，工具成功后才说"记住了"），记忆列表里带上 `#ID`，供 `forget` 使用。`remember` 复用原来的密钥检测；它只认 `sk-…` 和长 token 这类字符串，像"密码是 hunter2"这种自然语言的密码拦不住，这是记忆模块原有的局限。
+- **真实 API 验证**（临时工作区和临时记忆库，脚本自动回答 y）：改写 todo.md 时先 `read_file` 再 `edit_file`；数文件时 `run_shell` 的确认没有 `a` 选项；`web_fetch` 正确总结了 example.com；"记住下周三交报告"直接 `remember`，并把"下周三"换算成了具体日期；"忘掉刚才那条"时 `forget` 先确认，确认文字显示了记忆原文。
+- 符号链接越界的测试在这台 Windows 上被跳过（创建链接需要额外权限）；防护靠的是 `resolve()` 跟随链接后再检查，和其他越界测试走的是同一段代码。

@@ -479,7 +479,7 @@ def forget(args, context):
 
 def describe_forget(args, context):
     memory = _active_memory(context, args["id"])
-    return f"forget memory #{args['id']}: {memory.content}" if memory else f"forget memory #{args['id']} (not found)"
+    return f"memory #{args['id']}: {memory.content}" if memory else f"memory #{args['id']}, which does not exist"
 
 
 MEMORY_TOOLS = [
