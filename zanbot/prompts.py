@@ -56,8 +56,6 @@ NO_TOOLS = (
 )
 NO_TOOLS_REASONS = {
     "no-tools": "Reason: Zanbot was started with --no-tools; restarting without it enables the tools.",
-    "provider": "Reason: tools are not supported yet with the current provider; they work with the Anthropic "
-                "provider.",
 }
 
 

@@ -5,8 +5,9 @@ import re
 
 from zanbot.llm import APIError, create_message
 
-# Blocks a final reply may contain. Thinking blocks are kept in history unchanged.
-SUPPORTED_BLOCKS = {"text", "thinking", "redacted_thinking"}
+# Blocks a final reply may contain. Thinking (Anthropic) and reasoning (ChatGPT) blocks are kept in
+# history unchanged and sent back only to the provider that produced them.
+SUPPORTED_BLOCKS = {"text", "thinking", "redacted_thinking", "reasoning"}
 FINAL_STOP_REASONS = {"end_turn", "max_tokens", "stop_sequence", "refusal"}
 
 MAX_STEPS = 10

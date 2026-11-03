@@ -182,13 +182,12 @@ class LoopTests(unittest.TestCase):
 
 class ToolPromptTests(unittest.TestCase):
     def test_sessions_without_tools_say_so_and_why(self):
-        cases = ((Config(api_key="k"), None, "started with --no-tools"),
-                 (Config(api_key="", model="m", provider="chatgpt"), FakeTools(), "current provider"))
-        for config, tools, reason in cases:
-            with self.subTest(provider=config.provider):
-                prompt = ChatSession(config, lambda e: None, tools=tools).system_prompt()
+        for provider in ("anthropic", "chatgpt"):
+            with self.subTest(provider=provider):
+                config = Config(api_key="k", model="m", provider=provider)
+                prompt = ChatSession(config, lambda e: None, tools=None).system_prompt()
                 self.assertIn(NO_TOOLS, prompt)
-                self.assertIn(reason, prompt)
+                self.assertIn("started with --no-tools", prompt)
                 self.assertNotIn(TOOL_GUIDE, prompt)
 
     def test_sessions_with_tools_get_the_tool_guide_only(self):
@@ -227,14 +226,6 @@ class SessionToolTests(unittest.TestCase):
         self.session(FakeTools()).submit("Hi")
         self.assertIn("tools", post.call_args.kwargs["json"])
         self.assertIn(TOOL_GUIDE, post.call_args.kwargs["json"]["system"])
-
-    def test_chatgpt_provider_gets_no_tools(self, post):
-        session = self.session(FakeTools(), provider="chatgpt")
-        with patch("zanbot.chatgpt.create_message", return_value={"content": [{"type": "text", "text": "Hi"}],
-                                                                   "stop_reason": "end_turn"}) as create:
-            session.submit("Hi")
-        self.assertNotIn(TOOL_GUIDE, create.call_args.args[3])
-        post.assert_not_called()
 
     def test_side_effects_of_a_failed_turn_are_noted_in_the_next_one(self, post):
         post.side_effect = [streamed(tool_block('{"path": "todo.md"}', name="write_note"), stop="tool_use"),

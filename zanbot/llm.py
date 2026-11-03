@@ -40,8 +40,7 @@ def create_message(messages, config, on_text=None, system=None, tools=None, tool
     if config.provider == "chatgpt":
         from zanbot.chatgpt import create_message as create_chatgpt_message
 
-        # Tools are not supported on this provider yet (roadmap N7).
-        return create_chatgpt_message(messages, config, on_text, system)
+        return create_chatgpt_message(messages, config, on_text, system, tools=tools, tool_choice=tool_choice)
 
     url = "https://api.anthropic.com/v1/messages"
     body = {

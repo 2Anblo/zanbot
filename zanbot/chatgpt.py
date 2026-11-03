@@ -1,5 +1,7 @@
 """ChatGPT plan inference through the public Responses API."""
 
+import json
+
 import requests
 from filelock import Timeout
 
@@ -19,6 +21,63 @@ def list_models():
             return [model for model in models if model.get("visibility") == "list"]
     except (requests.RequestException, ValueError, KeyError, TypeError) as exc:
         raise AuthError("Could not read the ChatGPT model catalog.") from exc
+
+
+def _tool_use(item):
+    """A Responses function_call item as a tool_use block. Its call_id is the id results must answer."""
+    if not item.get("call_id") or not item.get("name"):
+        raise ValueError("ChatGPT returned a tool call without an id or name.")
+    arguments = item.get("arguments") or ""
+    try:
+        # A tool without parameters may come back with empty arguments.
+        tool_input = json.loads(arguments) if arguments.strip() else {}
+    except ValueError:
+        tool_input = None
+    if not isinstance(tool_input, dict):
+        raise ValueError("ChatGPT returned invalid tool input.")
+    return {"type": "tool_use", "id": item["call_id"], "name": item["name"], "input": tool_input}
+
+
+def to_tools(schemas):
+    """Anthropic-style tool definitions as Responses function tools."""
+    # Not strict: strict mode needs every property listed as required, and ours have optional ones.
+    return [{"type": "function", "name": s["name"], "description": s["description"],
+             "parameters": s["input_schema"], "strict": False} for s in schemas]
+
+
+def to_input(messages):
+    """Zanbot's history (Anthropic shape) as Responses input items."""
+    items = []
+    for message in messages:
+        role, content = message["role"], message["content"]
+        if isinstance(content, str):
+            items.append({"role": role, "content": content})
+            continue
+        texts = []
+
+        def flush():
+            if texts:
+                items.append({"role": role, "content": "\n".join(texts)})
+                texts.clear()
+
+        for block in content:
+            kind = block.get("type")
+            if kind == "text":
+                texts.append(block["text"])
+                continue
+            flush()  # Keep text and calls in their original order.
+            if kind == "tool_use":
+                items.append({"type": "function_call", "call_id": block["id"], "name": block["name"],
+                              "arguments": json.dumps(block["input"], ensure_ascii=False)})
+            elif kind == "tool_result":
+                output = block["content"]
+                items.append({"type": "function_call_output", "call_id": block["tool_use_id"],
+                              "output": "Error: " + output if block.get("is_error") else output})
+            elif kind == "reasoning":
+                items.append(block["item"])
+            # Anthropic thinking blocks mean nothing to this provider and are skipped.
+        flush()
+    return items
 
 
 def read_response(lines, on_text=None):
@@ -55,29 +114,37 @@ def read_response(lines, on_text=None):
                             content.append({"type": "text", "text": text})
                             if on_text is not None:
                                 on_text(text)
-            if not content:
+                elif item.get("type") == "function_call":
+                    content.append(_tool_use(item))
+                elif item.get("type") == "reasoning":
+                    # Opaque (encrypted) reasoning, sent back unchanged so the model keeps its train of thought.
+                    content.append({"type": "reasoning", "item": item})
+            calls = any(block["type"] == "tool_use" for block in content)
+            if not calls and not any(block["type"] == "text" for block in content):
                 raise ValueError("ChatGPT did not return a text answer.")
-            return {"content": content, "stop_reason": "end_turn",
+            # The rest of Zanbot speaks the Anthropic shape: tool calls are tool_use blocks.
+            return {"content": content, "stop_reason": "tool_use" if calls else "end_turn",
                     "usage": response.get("usage"), "model": response.get("model"), "id": response.get("id")}
     raise ValueError("The stream ended before response.completed.")
 
 
-def create_message(messages, config, on_text=None, system=None):
+def create_message(messages, config, on_text=None, system=None, tools=None, tool_choice=None):
     from zanbot.llm import APIError, post_with_retry, server_error_hint
 
     try:
         token = get_access_token()
-        inputs = []
-        for message in messages:
-            content = message["content"]
-            text = content if isinstance(content, str) else "\n".join(
-                block["text"] for block in content if block.get("type") == "text")
-            inputs.append({"role": message["role"], "content": text})
+        body = {"model": config.model, "instructions": system or SYSTEM_PROMPT, "input": to_input(messages),
+                "store": False, "stream": True}
+        if tools:
+            body["tools"] = to_tools(tools)
+            # With store=false the server keeps nothing, so ask for the reasoning to send back next step.
+            body["include"] = ["reasoning.encrypted_content"]
+        if tool_choice and tool_choice.get("type") == "none":
+            body["tool_choice"] = "none"
         with post_with_retry(lambda: requests.post(
             RESOURCE + "/responses",
             headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-            json={"model": config.model, "instructions": system or SYSTEM_PROMPT, "input": inputs,
-                  "store": False, "stream": True},
+            json=body,
             stream=True, timeout=(10, 120),
         )) as response:
             if not response.ok:
