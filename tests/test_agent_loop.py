@@ -46,6 +46,14 @@ class FakeTools:
     def has_side_effect(self, name):
         return name in self.side_effects
 
+    needs_permission = has_side_effect
+
+    def allows_always(self, name):
+        return True
+
+    def describe(self, call):
+        return None
+
 
 @patch("zanbot.llm.requests.post")
 class LoopTests(unittest.TestCase):

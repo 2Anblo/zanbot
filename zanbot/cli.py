@@ -269,14 +269,16 @@ class InteractiveTerminal(PlainTerminal):
         print(f"Zanbot wants to run {request.tool}({request.arguments})")
         # A plain prompt without history or completion; Ctrl+C cancels the whole turn.
         question = PromptSession(input=self.input, output=self.output)
+        choices = ("y", "yes", "n", "no") + (("a", "always") if request.allow_always else ())
+        text = "Allow? [y]es / [n]o" + (" / [a]lways this session" if request.allow_always else " (asked every time)")
         while True:
             try:
-                answer = question.prompt("Allow? [y]es / [n]o / [a]lways this session: ").strip().lower()
+                answer = question.prompt(text + ": ").strip().lower()
             except EOFError:
                 return "n"
-            if answer in ("y", "yes", "n", "no", "a", "always"):
+            if answer in choices:
                 return answer[0]
-            print("Please answer y, n, or a.")
+            print("Please answer y, n, or a." if request.allow_always else "Please answer y or n.")
 
     def run(self, config, store=None, worker=None, tools=None):
         self.session = ChatSession(config, self.render, store, worker, tools, ask=self.ask_permission)

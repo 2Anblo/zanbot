@@ -14,7 +14,7 @@ from zanbot.cli import InteractiveTerminal, PlainTerminal
 from zanbot.config import Config
 from zanbot.session import (ChatSession, Info, PermissionRequest, ReplyFailed, ReplyFinished, ReplyStarted,
                             TextDelta, ToolDenied)
-from zanbot.tools import default_tools
+from zanbot.tools import Tool, ToolContext, ToolRegistry, default_tools
 
 
 def write_call(text="hi", id="t1"):
@@ -121,24 +121,53 @@ class InteractivePermissionTests(unittest.TestCase):
     def setUp(self):
         directory = tempfile.TemporaryDirectory()
         self.addCleanup(directory.cleanup)
-        self.notes = Path(directory.name) / "notes"
+        self.notes = Path(directory.name)
 
-    def run_terminal(self, post, keys):
-        post.side_effect = [streamed(write_call(), stop="tool_use"), streamed(text_block("Ok"))]
+    def run_terminal(self, post, keys, tools=None, block=None):
+        block = block or tool_block('{"path": "a.md", "content": "hi"}', name="write_file")
+        post.side_effect = [streamed(block, stop="tool_use"), streamed(text_block("Ok"))]
         with create_pipe_input() as pipe, create_app_session(input=pipe, output=DummyOutput()):
             pipe.send_text(keys)
             terminal = InteractiveTerminal(input=pipe, output=DummyOutput())
-            self.assertEqual(terminal.run(Config(api_key="k"), tools=default_tools(self.notes)), 0)
+            self.assertEqual(terminal.run(Config(api_key="k"), tools=tools or default_tools(self.notes)), 0)
 
-    def test_yes_writes_the_note(self, post, print_mock):
+    def test_yes_writes_the_file(self, post, print_mock):
         self.run_terminal(post, "Write a note\ry\r/exit\r")
-        self.assertEqual((self.notes / "a.md").read_text(encoding="utf-8"), "hi\n")
-        print_mock.assert_any_call('Zanbot wants to run write_note({"name": "a.md", "text": "hi"})')
+        self.assertEqual((self.notes / "a.md").read_text(encoding="utf-8"), "hi")
+        print_mock.assert_any_call('Zanbot wants to run write_file({"path": "a.md", "content": "hi"})')
 
     def test_invalid_answer_asks_again(self, post, print_mock):
         self.run_terminal(post, "Write a note\rwhat\rn\r/exit\r")
         self.assertFalse((self.notes / "a.md").exists())
         print_mock.assert_any_call("Please answer y, n, or a.")
+
+    def test_always_is_not_offered_for_ask_each_time_tools(self, post, print_mock):
+        ran = []
+        tool = Tool("danger", "D.", {"type": "object", "properties": {}}, "local",
+                    lambda args, ctx: ran.append(1) or "done", permission="ask_each_time")
+        tools = ToolRegistry([tool], ToolContext(workspace=self.notes))
+        # "a" is not a valid answer here, so it is asked again; then "n".
+        self.run_terminal(post, "Go\ra\rn\r/exit\r", tools=tools, block=tool_block("{}", name="danger"))
+        self.assertEqual(ran, [])
+        print_mock.assert_any_call("Please answer y or n.")
+
+
+class AlwaysAnswerTests(unittest.TestCase):
+    @patch("zanbot.llm.requests.post")
+    def test_session_ignores_always_for_ask_each_time_tools(self, post):
+        # Even if a frontend returns "a", the session must not remember it for such a tool.
+        ran = []
+        tool = Tool("danger", "D.", {"type": "object", "properties": {}}, "local",
+                    lambda args, ctx: ran.append(1) or "done", permission="ask_each_time")
+        tools = ToolRegistry([tool], ToolContext(workspace=Path(".")))
+        requests_seen = []
+        session = ChatSession(Config(api_key="k"), lambda e: None, tools=tools,
+                              ask=lambda request: requests_seen.append(request) or "a")
+        post.side_effect = [streamed(tool_block("{}", name="danger"), stop="tool_use"), streamed(text_block("Ok"))]
+        session.submit("Go")
+        self.assertEqual(ran, [])
+        self.assertFalse(requests_seen[0].allow_always)
+        self.assertNotIn("danger", session.allowed_tools)
 
 
 if __name__ == "__main__":

@@ -96,7 +96,7 @@ def _validated(response, tools_allowed):
 
 def _run_tool(tools, call, hooks, effects):
     side_effect = tools.has_side_effect(call["name"])
-    allowed = hooks.ask_permission(call) if side_effect else True
+    allowed = hooks.ask_permission(call) if tools.needs_permission(call["name"]) else True
     if allowed is not True:
         # Tell the model why, so it does not offer to retry something that cannot work.
         output, is_error = (CANNOT_ASK if allowed is None else DENIED), True
@@ -122,7 +122,7 @@ def run_turn(messages, user_input, config, on_text=None, system=None, tools=None
     """Run one turn and return (answer, truncated), where answer is the last reply's text.
 
     History is extended only when the whole turn succeeds. tools provides schemas(), execute(call)
-    -> (text, is_error) and has_side_effect(name); hooks may cancel between steps by raising from
+    -> (text, is_error), has_side_effect(name) and needs_permission(name); hooks may cancel between steps by raising from
     check_cancelled(). Calls with side effects are appended to effects as they start, so a caller
     can report them even if the turn later fails.
     """

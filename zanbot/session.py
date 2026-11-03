@@ -107,6 +107,7 @@ class PermissionRequest:
     """A tool call with side effects, waiting for the user's answer: "y", "n", or "a" (always, this session)."""
     tool: str
     arguments: str  # JSON, shortened for display
+    allow_always: bool = True  # False for tools that must be confirmed every time, such as run_shell.
 
 
 @dataclass(frozen=True)
@@ -264,8 +265,12 @@ class ChatSession:
 
     def answer_permission(self, pending):
         call = pending["call"]
+        allow_always = self.tools is not None and self.tools.allows_always(call["name"])
         # Ctrl+C here propagates out of wait_for and cancels the turn; the reply thread sees it.
-        answer = self.ask(PermissionRequest(call["name"], preview(call["input"])))
+        described = self.tools.describe(call) if self.tools is not None else None
+        answer = self.ask(PermissionRequest(call["name"], described or preview(call["input"]), allow_always))
+        if answer == "a" and not allow_always:
+            answer = "n"  # Never widen permission for a tool that must be confirmed each time.
         if answer == "a":
             self.allowed_tools.add(call["name"])
         pending["allowed"] = answer in ("y", "a")

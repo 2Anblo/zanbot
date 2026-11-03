@@ -42,7 +42,7 @@ class ValidateTests(unittest.TestCase):
 
 class RegistryTests(unittest.TestCase):
     def setUp(self):
-        self.context = ToolContext(notes_dir=Path("unused"))
+        self.context = ToolContext(workspace=Path("unused"))
 
     def test_schemas_are_sorted_api_definitions(self):
         b = Tool("b", "B.", {"type": "object", "properties": {}}, "none", lambda a, c: "")
@@ -81,11 +81,13 @@ class RegistryTests(unittest.TestCase):
                 self.assertIn(message, output)
 
 
-class NoteToolTests(unittest.TestCase):
+class FileToolTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
-        self.notes = Path(self.temp.name) / "notes"
-        self.registry = default_tools(self.notes)
+        self.root = Path(self.temp.name)
+        self.workspace = self.root / "ws"
+        self.workspace.mkdir()
+        self.registry = default_tools(self.workspace)
 
     def tearDown(self):
         self.temp.cleanup()
@@ -93,46 +95,113 @@ class NoteToolTests(unittest.TestCase):
     def run_tool(self, tool_name, **input):
         return self.registry.execute(call(tool_name, input))
 
-    def test_list_dir_before_any_note_exists(self):
+    def write(self, name, data):
+        path = self.workspace / name
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(data.encode("utf-8") if isinstance(data, str) else data)
+        return path
+
+    def test_list_dir(self):
         self.assertEqual(self.run_tool("list_dir"), ("(empty)", False))
-
-    def test_write_then_list(self):
-        self.assertEqual(self.run_tool("write_note", name="todo.md", text="买牛奶"),
-                         ("Appended 3 characters to todo.md.", False))
-        self.run_tool("write_note", name="todo.md", text="交作业")
-        (self.notes / "drafts").mkdir()
-        self.assertEqual((self.notes / "todo.md").read_text(encoding="utf-8"), "买牛奶\n交作业\n")
+        self.write("todo.md", "x")
+        (self.workspace / "drafts").mkdir()
         self.assertEqual(self.run_tool("list_dir"), ("drafts/\ntodo.md", False))
-
-    def test_list_dir_stays_inside_the_notes_folder(self):
-        self.notes.mkdir()
-        for path in ("..", "../..", "C:/Windows", "/etc", "sub/../../x"):
-            with self.subTest(path=path):
-                output, is_error = self.run_tool("list_dir", path=path)
-                self.assertTrue(is_error)
-                self.assertIn("inside the notes folder", output)
-
-    def test_list_dir_missing_subfolder(self):
-        self.notes.mkdir()
         output, is_error = self.run_tool("list_dir", path="nope")
         self.assertTrue(is_error)
         self.assertIn("No folder named 'nope'", output)
 
-    def test_write_note_rejects_unsafe_names(self):
-        for name in ("../x.md", "a/b.md", "a\\b.md", "", ".hidden", "con", "x" * 101, "a:b.md"):
-            with self.subTest(name=name):
-                output, is_error = self.run_tool("write_note", name=name, text="x")
+    def test_no_tool_can_leave_the_workspace(self):
+        outside = self.root / "secret.txt"
+        outside.write_text("secret", encoding="utf-8")
+        attempts = [("list_dir", {"path": ".."}), ("list_dir", {"path": "C:/Windows"}),
+                    ("read_file", {"path": "../secret.txt"}), ("read_file", {"path": str(outside)}),
+                    ("read_file", {"path": "sub/../../secret.txt"}),
+                    ("write_file", {"path": "../evil.txt", "content": "x"}),
+                    ("edit_file", {"path": "../secret.txt", "old_text": "secret", "new_text": "gone"})]
+        for name, input in attempts:
+            with self.subTest(name=name, input=input):
+                output, is_error = self.registry.execute(call(name, input))
                 self.assertTrue(is_error)
-        self.assertFalse(self.notes.exists() and any(self.notes.iterdir()))
+                self.assertIn("must be inside the workspace", output)
+        self.assertEqual(outside.read_text(encoding="utf-8"), "secret")
+        self.assertFalse((self.root / "evil.txt").exists())
 
-    def test_write_note_limits_text_size(self):
-        output, is_error = self.run_tool("write_note", name="big.md", text="x" * 20_001)
+    def test_a_link_pointing_outside_is_refused(self):
+        (self.root / "secret.txt").write_text("secret", encoding="utf-8")
+        try:
+            (self.workspace / "link.txt").symlink_to(self.root / "secret.txt")
+        except OSError:
+            self.skipTest("Creating symbolic links needs extra rights on this system.")
+        output, is_error = self.run_tool("read_file", path="link.txt")
         self.assertTrue(is_error)
-        self.assertIn("20,000", output)
+        self.assertIn("must be inside the workspace", output)
 
-    def test_side_effects_are_declared(self):
-        self.assertFalse(self.registry.has_side_effect("list_dir"))
-        self.assertTrue(self.registry.has_side_effect("write_note"))
+    def test_absolute_paths_inside_the_workspace_are_fine(self):
+        self.write("a.txt", "hi")
+        self.assertEqual(self.run_tool("read_file", path=str(self.workspace / "a.txt")), ("hi", False))
+
+    def test_read_file_whole_and_in_parts(self):
+        self.write("lines.txt", "".join(f"line {i}\n" for i in range(1, 11)))
+        self.assertEqual(self.run_tool("read_file", path="lines.txt")[0].count("line"), 10)
+        output, _ = self.run_tool("read_file", path="lines.txt", offset=4, limit=2)
+        self.assertEqual(output, "line 4\nline 5\n\n[Lines 4-5 of 10. Use offset and limit to read other lines.]")
+        output, _ = self.run_tool("read_file", path="lines.txt", offset=50)
+        self.assertEqual(output, "[The file has only 10 lines.]")
+
+    def test_read_file_refusals(self):
+        self.write("image.png", b"\x89PNG\x00\x00binary")
+        for path, message in (("image.png", "binary"), ("missing.txt", "No file named"), (".", "No file named")):
+            with self.subTest(path=path):
+                output, is_error = self.run_tool("read_file", path=path)
+                self.assertTrue(is_error)
+                self.assertIn(message, output)
+
+    def test_write_file_creates_and_replaces(self):
+        self.assertEqual(self.run_tool("write_file", path="notes/todo.md", content="买牛奶\n"),
+                         ("Created notes/todo.md (4 characters).", False))
+        self.assertEqual(self.run_tool("write_file", path="notes/todo.md", content="交作业\r\n"),
+                         ("Replaced notes/todo.md (5 characters).", False))
+        self.assertEqual((self.workspace / "notes/todo.md").read_bytes(), "交作业\r\n".encode("utf-8"))
+
+    def test_write_file_limits(self):
+        (self.workspace / "folder").mkdir()
+        for input, message in (({"path": "big.txt", "content": "x" * 200_001}, "200,000"),
+                               ({"path": "folder", "content": "x"}, "is a folder")):
+            with self.subTest(message=message):
+                output, is_error = self.registry.execute(call("write_file", input))
+                self.assertTrue(is_error)
+                self.assertIn(message, output)
+
+    def test_edit_file_replaces_exactly_one_occurrence(self):
+        path = self.write("todo.md", "- 买牛奶\r\n- 交作业\r\n")
+        self.assertEqual(self.run_tool("edit_file", path="todo.md", old_text="- 买牛奶", new_text="- 买豆浆"),
+                         ("Edited todo.md: replaced 5 characters with 5.", False))
+        # Windows line endings are kept.
+        self.assertEqual(path.read_bytes(), "- 买豆浆\r\n- 交作业\r\n".encode("utf-8"))
+
+    def test_edit_file_refuses_missing_repeated_or_empty_text(self):
+        path = self.write("todo.md", "- a\n- a\n")
+        for old, message in (("- b", "was not found"), ("- a", "appears 2 times"), ("", "must not be empty")):
+            with self.subTest(old=old):
+                output, is_error = self.run_tool("edit_file", path="todo.md", old_text=old, new_text="x")
+                self.assertTrue(is_error)
+                self.assertIn(message, output)
+        self.assertEqual(path.read_text(encoding="utf-8"), "- a\n- a\n")
+
+    def test_permissions_are_declared(self):
+        self.assertFalse(self.registry.needs_permission("list_dir"))
+        self.assertFalse(self.registry.needs_permission("read_file"))
+        for name in ("write_file", "edit_file"):
+            self.assertTrue(self.registry.has_side_effect(name))
+            self.assertTrue(self.registry.needs_permission(name))
+            self.assertTrue(self.registry.allows_always(name))
+
+    def test_ask_each_time_never_allows_always(self):
+        tool = Tool("danger", "D.", {"type": "object", "properties": {}}, "local", lambda a, c: "",
+                    permission="ask_each_time")
+        registry = ToolRegistry([tool], ToolContext(workspace=self.workspace))
+        self.assertTrue(registry.needs_permission("danger"))
+        self.assertFalse(registry.allows_always("danger"))
 
 
 @patch("zanbot.llm.requests.post")
@@ -142,13 +211,15 @@ class PermissionGateTests(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
         self.notes = Path(self.temp.name) / "notes"
+        self.notes.mkdir()
         self.registry = default_tools(self.notes)
 
     def tearDown(self):
         self.temp.cleanup()
 
     def turn(self, post, hooks=None):
-        post.side_effect = [streamed(tool_block('{"name": "a.md", "text": "hi"}', name="write_note"), stop="tool_use"),
+        post.side_effect = [streamed(tool_block('{"path": "a.md", "content": "hi\\n"}', name="write_file"),
+                                     stop="tool_use"),
                             streamed(text_block("Ok"))]
         effects = []
         run_turn([], "Write a note", Config(api_key="k"), tools=self.registry, hooks=hooks, effects=effects)
@@ -167,8 +238,8 @@ class PermissionGateTests(unittest.TestCase):
         result, effects = self.turn(post, hooks)
         self.assertNotIn("is_error", result)
         self.assertEqual((self.notes / "a.md").read_text(encoding="utf-8"), "hi\n")
-        self.assertEqual([c["name"] for c in effects], ["write_note"])
-        self.assertEqual(hooks.ask_permission.call_args.args[0]["name"], "write_note")
+        self.assertEqual([c["name"] for c in effects], ["write_file"])
+        self.assertEqual(hooks.ask_permission.call_args.args[0]["name"], "write_file")
 
     def test_read_only_tools_never_ask(self, post):
         post.side_effect = [streamed(tool_block("{}"), stop="tool_use"), streamed(text_block("Ok"))]
@@ -191,7 +262,7 @@ class MainWiringTests(unittest.TestCase):
 
     def test_tools_are_offered_by_default(self, post, config, output):
         sent = self.run_main(post)
-        self.assertEqual([t["name"] for t in sent["tools"]], ["list_dir", "write_note"])
+        self.assertEqual([t["name"] for t in sent["tools"]], ["edit_file", "list_dir", "read_file", "run_shell", "web_fetch", "write_file"])
 
     def test_no_tools_flag(self, post, config, output):
         self.assertNotIn("tools", self.run_main(post, "--no-tools"))

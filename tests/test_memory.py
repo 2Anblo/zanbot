@@ -117,8 +117,8 @@ class MemoryCliTests(TempStoreTest):
         post.return_value = reply()
         self.run_cli(["/remember preference 回答偏好简洁", "/remember 用户养了一只猫", "你好"])
         system = post.call_args.kwargs["json"]["system"]
-        self.assertIn("- [preference] 回答偏好简洁", system)
-        self.assertIn("- [note] 用户养了一只猫", system)
+        self.assertIn("[preference] 回答偏好简洁", system)  # With tools on, each line also has its #ID.
+        self.assertIn("[note] 用户养了一只猫", system)
         self.assertEqual(post.call_count, 1)
         self.assertEqual([job[1:] for job in self.jobs], [("你好", "你好")])
         self.assertEqual(post.call_args.kwargs["json"]["messages"], [{"role": "user", "content": "你好"}])
