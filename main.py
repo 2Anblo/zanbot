@@ -1,4 +1,5 @@
 import argparse
+from pathlib import Path
 import sqlite3
 import sys
 
@@ -39,6 +40,7 @@ def main(argv=None):
     parser.add_argument("--no-history", action="store_true", help="Keep input history for this session only")
     parser.add_argument("--plain", action="store_true", help="Use simple line input without completion")
     parser.add_argument("--no-tools", action="store_true", help="Answer without calling any tools")
+    parser.add_argument("--workspace", help="Folder the file tools may use (default: the Zanbot notes folder)")
     args = parser.parse_args([] if argv is None else argv)
     from zanbot.chatgpt_auth import AuthError, accounts, login, logout
     from filelock import Timeout
@@ -72,8 +74,31 @@ def main(argv=None):
         except (sqlite3.Error, OSError):
             print("Warning: Memory storage is unavailable. Continuing without memory.")
     worker = MemoryWorker(store) if store is not None else None
-    tools = None if args.no_tools else default_tools(memory_directory() / "notes")
+    tools = None
+    if not args.no_tools:
+        workspace = choose_workspace(args.workspace)
+        if workspace is None:
+            return 1
+        tools = default_tools(workspace, store)
+        print(f"Workspace: {workspace}")
     return choose_terminal(args).run(config, store, worker, tools)
+
+
+def choose_workspace(path):
+    """Return the folder file tools may use, or None (after saying why) if it is unusable."""
+    if path is None:
+        workspace = memory_directory() / "notes"
+        try:
+            workspace.mkdir(parents=True, exist_ok=True)
+        except OSError as exc:
+            print(f"Configuration error: cannot create the notes folder {workspace}: {exc.strerror or exc}")
+            return None
+        return workspace
+    workspace = Path(path).expanduser().resolve()
+    if not workspace.is_dir():
+        print(f"Configuration error: --workspace must be an existing folder: {workspace}")
+        return None
+    return workspace
 
 
 def choose_terminal(args):
