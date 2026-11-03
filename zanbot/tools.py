@@ -1,7 +1,11 @@
 """Tools the model can call, and the registry that describes and runs them."""
 
 from dataclasses import dataclass, field
+import os
 from pathlib import Path
+import signal
+import subprocess
+import sys
 from typing import Any, Callable
 
 SIDE_EFFECTS = ("none", "local", "external")  # none: read-only; local: changes this computer; external: reaches out
@@ -234,5 +238,60 @@ FILE_TOOLS = [
 ]
 
 
+# --- Shell ---------------------------------------------------------------------------------------
+
+SHELL_TIMEOUT = 30  # Seconds. Ctrl+C waits for the running tool, so keep this short.
+WINDOWS = sys.platform == "win32"
+
+
+def _shell_command(command):
+    if WINDOWS:
+        # Make PowerShell write UTF-8 to the pipe, whatever the console's code page is.
+        prefix = "[Console]::OutputEncoding = [Text.Encoding]::UTF8; $OutputEncoding = [Text.Encoding]::UTF8; "
+        return ["powershell", "-NoProfile", "-NonInteractive", "-Command", prefix + command], {
+            "creationflags": subprocess.CREATE_NEW_PROCESS_GROUP}
+    return ["/bin/sh", "-c", command], {"start_new_session": True}
+
+
+def _stop(process):
+    """Stop a command and everything it started, so nothing keeps running after a timeout."""
+    if WINDOWS:
+        subprocess.run(["taskkill", "/T", "/F", "/PID", str(process.pid)], capture_output=True)
+    else:
+        try:
+            os.killpg(process.pid, signal.SIGKILL)
+        except ProcessLookupError:
+            pass
+
+
+def run_shell(args, context):
+    argv, options = _shell_command(args["command"])
+    process = subprocess.Popen(argv, cwd=context.workspace.resolve(), stdin=subprocess.DEVNULL,
+                               stdout=subprocess.PIPE, stderr=subprocess.STDOUT, **options)
+    try:
+        output, _ = process.communicate(timeout=SHELL_TIMEOUT)
+    except subprocess.TimeoutExpired:
+        _stop(process)
+        try:
+            output, _ = process.communicate(timeout=5)
+        except subprocess.TimeoutExpired:
+            output = b""
+        text = output.decode("utf-8", errors="replace").rstrip()
+        return (f"Timed out after {SHELL_TIMEOUT} seconds; the command and everything it started were stopped."
+                + (f"\nOutput so far:\n{text}" if text else "")), True
+    text = output.decode("utf-8", errors="replace").rstrip()
+    return f"Exit code {process.returncode}" + (f"\n{text}" if text else " (no output)"), process.returncode != 0
+
+
+SHELL_TOOLS = [
+    Tool("run_shell",
+         ("Run one " + ("PowerShell" if WINDOWS else "sh") + " command in the workspace folder and return its "
+          f"exit code and output. Stopped after {SHELL_TIMEOUT} seconds. There is no input: commands that "
+          "wait for a reply will time out. The user is asked before every command."),
+         _schema({"command": {"type": "string"}}, ["command"]),
+         "external", run_shell, permission="ask_each_time"),
+]
+
+
 def default_tools(workspace, store=None):
-    return ToolRegistry(FILE_TOOLS, ToolContext(workspace=workspace, store=store))
+    return ToolRegistry(FILE_TOOLS + SHELL_TOOLS, ToolContext(workspace=workspace, store=store))
