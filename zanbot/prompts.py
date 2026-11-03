@@ -16,6 +16,18 @@ MEMORY_GUIDE = (
     "starts a new conversation; saved memories remain. Memories are not files and have nothing to do "
     "with the user's notes folder."
 )
+# Used instead when the remember and forget tools are available.
+MEMORY_GUIDE_TOOLS = (
+    "Long-term memory: Zanbot keeps memories about the user across conversations. After each reply, "
+    "a separate background step saves, updates, or deletes durable facts automatically, so you do not "
+    "need to save things yourself. When the user explicitly asks you to remember something, use the "
+    "remember tool; when they ask you to forget something, use the forget tool with the memory's #ID "
+    "(the user is asked to confirm). Say that something was remembered or forgotten only after the tool "
+    "succeeds. The user can also manage memories with commands: /memory lists them, /remember <text> "
+    "adds one, /forget <id> deletes one, and /memory off pauses automatic saving for this session (saved "
+    "memories are still used). /clear only starts a new conversation; saved memories remain. Memories are "
+    "not files and have nothing to do with the workspace."
+)
 MEMORY_PAUSED = (
     "Automatic saving is paused for this session, so new facts are saved only if the user runs "
     "/remember. /memory on resumes it."
@@ -39,11 +51,11 @@ TOOL_GUIDE = (
 )
 # Without this, a model asked about files guesses a reason (it once blamed --no-memory) or invents contents.
 NO_TOOLS = (
-    "Tools: none in this session. You cannot see, list, read, or change the user's files, including "
-    "Zanbot's notes folder. If asked to, say so plainly and do not guess at what the files contain."
+    "Tools: none in this session. You cannot see, list, read, or change the user's files, run commands, "
+    "or open web pages. If asked to, say so plainly and do not guess at what the files or pages contain."
 )
 NO_TOOLS_REASONS = {
-    "no-tools": "Reason: Zanbot was started with --no-tools; restarting without it enables the notes tools.",
+    "no-tools": "Reason: Zanbot was started with --no-tools; restarting without it enables the tools.",
     "provider": "Reason: tools are not supported yet with the current provider; they work with the Anthropic "
                 "provider.",
 }
@@ -59,12 +71,17 @@ def build_system_prompt(memories, today, memory="on", tools=False):
         parts.append(TOOL_GUIDE)
     else:
         parts.append(" ".join([NO_TOOLS, *([NO_TOOLS_REASONS[tools]] if tools else [])]))
+    # The remember and forget tools exist exactly when tools are on and memory is not off.
+    memory_tools = tools is True and memory != "off"
     if memory == "off":
         parts.append(MEMORY_OFF)
     else:
-        parts.append(MEMORY_GUIDE + (" " + MEMORY_PAUSED if memory == "paused" else ""))
+        guide = MEMORY_GUIDE_TOOLS if memory_tools else MEMORY_GUIDE
+        parts.append(guide + (" " + MEMORY_PAUSED if memory == "paused" else ""))
     if memories:
         # Neutralize angle brackets so a stored memory cannot close the data block.
-        lines = [f"- [{m.kind}] " + m.content.replace("<", "‹").replace(">", "›") for m in memories]
+        # IDs are shown only when the model can use them, with the forget tool.
+        lines = [f"- {f'#{m.id} ' if memory_tools else ''}[{m.kind}] " + m.content.replace("<", "‹").replace(">", "›")
+                 for m in memories]
         parts.append(MEMORY_PREAMBLE + "\n<memories>\n" + "\n".join(lines) + "\n</memories>")
     return "\n\n".join(parts)

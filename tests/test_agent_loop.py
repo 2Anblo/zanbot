@@ -51,6 +51,9 @@ class FakeTools:
     def allows_always(self, name):
         return True
 
+    def describe(self, call):
+        return None
+
 
 @patch("zanbot.llm.requests.post")
 class LoopTests(unittest.TestCase):

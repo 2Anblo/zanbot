@@ -8,6 +8,7 @@ from pathlib import Path
 import re
 import signal
 import socket
+import sqlite3
 import subprocess
 import sys
 import time
@@ -15,6 +16,8 @@ from typing import Any, Callable
 from urllib.parse import urljoin, urlsplit
 
 import requests
+
+from zanbot.memory import KINDS, MemoryStoreError
 
 SIDE_EFFECTS = ("none", "local", "external")  # none: read-only; local: changes this computer; external: reaches out
 # none: runs without asking. ask: asks, and the user may answer "always". ask_each_time: asks every time.
@@ -43,6 +46,8 @@ class Tool:
     side_effect: str
     run: Callable[[dict, ToolContext], str]
     permission: str = field(default="")  # Empty: "none" for read-only tools, otherwise "ask".
+    # Optional: what a call will do, in words, for the permission question (instead of raw JSON).
+    describe: Callable[[dict, ToolContext], str] | None = None
 
     def __post_init__(self):
         if not self.permission:
@@ -108,6 +113,16 @@ class ToolRegistry:
         """Whether the user may answer "always" for this tool, rather than being asked every time."""
         tool = self.tools.get(name)
         return tool is not None and tool.permission == "ask"
+
+    def describe(self, call):
+        """Words for the permission question, or None to show the call's raw input."""
+        tool = self.tools.get(call["name"])
+        if tool is None or tool.describe is None or validate(call["input"], tool.input_schema):
+            return None
+        try:
+            return tool.describe(call["input"], self.context)
+        except Exception:  # A description is only a convenience; fall back to the raw input.
+            return None
 
     def execute(self, call):
         """Return (text, is_error)."""
@@ -435,5 +450,53 @@ WEB_TOOLS = [
 ]
 
 
+# --- Memory --------------------------------------------------------------------------------------
+
+
+def remember(args, context):
+    try:
+        memory_id = context.store.add(args["content"], kind=args.get("kind", "note"), source="tool")
+    except MemoryStoreError as exc:  # For example, text that looks like a password or key.
+        raise ToolError(str(exc))
+    except sqlite3.Error:
+        raise ToolError("Memory storage is unavailable right now.")
+    return f"Remembered #{memory_id}. The user can undo this with /forget {memory_id}."
+
+
+def _active_memory(context, memory_id):
+    return next((m for m in context.store.active() if m.id == memory_id), None)
+
+
+def forget(args, context):
+    try:
+        forgotten = context.store.forget(args["id"])
+    except sqlite3.Error:
+        raise ToolError("Memory storage is unavailable right now.")
+    if not forgotten:
+        raise ToolError(f"No active memory has ID {args['id']}.")
+    return f"Forgot #{args['id']}."
+
+
+def describe_forget(args, context):
+    memory = _active_memory(context, args["id"])
+    return f"forget memory #{args['id']}: {memory.content}" if memory else f"forget memory #{args['id']} (not found)"
+
+
+MEMORY_TOOLS = [
+    Tool("remember",
+         "Save a durable fact about the user to long-term memory right away. Use it only when the user asks "
+         "you to remember something; other facts are saved automatically after each reply.",
+         _schema({"content": {"type": "string", "description": "One short fact, in the user's language."},
+                  "kind": {"type": "string", "enum": list(KINDS)}}, ["content"]),
+         "local", remember, permission="none"),
+    Tool("forget",
+         "Delete one long-term memory by its ID (shown as #ID in your memories). Use it only when the user "
+         "asks you to forget something. The user is asked first.",
+         _schema({"id": {"type": "integer"}}, ["id"]),
+         "local", forget, describe=describe_forget),
+]
+
+
 def default_tools(workspace, store=None):
-    return ToolRegistry(FILE_TOOLS + SHELL_TOOLS + WEB_TOOLS, ToolContext(workspace=workspace, store=store))
+    tools = FILE_TOOLS + SHELL_TOOLS + WEB_TOOLS + (MEMORY_TOOLS if store is not None else [])
+    return ToolRegistry(tools, ToolContext(workspace=workspace, store=store))
