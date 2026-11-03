@@ -25,7 +25,7 @@ uv run python main.py --provider chatgpt --model <slug-from-model-list>
 
 Windows 凭据加密保存在项目目录外的 `%LOCALAPPDATA%/zanbot`，加密密钥由 `keyring` 存入系统凭据管理器。其他平台使用 `~/.config/zanbot`，需要配置安全的系统 keyring。程序自动续期，并通过文件锁防止多个进程同时刷新 token。续期失败或收到 HTTP 401 时，重新执行 `--login`。不要将 token 复制到项目文件中。
 
-ChatGPT 模式通过公开的 Responses API 请求，设置 `store=false` 和 `stream=true`，每轮携带完整上下文，仅收到 `response.completed` 后保存问答。不调用 ChatGPT 网页内部接口，不读取其他应用的缓存凭据。目前 plan 共享接口不接受 `max_output_tokens`，因此 `Config.max_tokens` 仅用于 Anthropic。
+ChatGPT 模式通过公开的 Responses API 请求，设置 `store=false` 和 `stream=true`，每轮携带完整上下文，仅收到 `response.completed` 后保存问答。不调用 ChatGPT 网页内部接口，不读取其他应用的缓存凭据。目前 plan 共享接口不接受 `max_output_tokens`，因此 `Config.max_tokens` 仅用于 Anthropic。工具通过 Responses 的 function calling 实现；开启工具时，Zanbot 会请求加密的推理内容，并在各步之间原样发回，因为服务端不保存任何内容。
 
 详见[接入设计](docs/chatgpt-sign-in.md)和[官方登录文档](https://developers.openai.com/siwc/token-sharing-open-source/sign-in)。自动化测试模拟登录和推理；需要真实浏览器授权并完成一次推理才能验证你的账户权限。
 
@@ -62,7 +62,7 @@ $env:ANTHROPIC_API_KEY = [Environment]::GetEnvironmentVariable("ANTHROPIC_API_KE
 - 未知的 `/` 命令会提示可能想输入的命令，不会发给模型；要发送以 `/` 开头的消息，在前面加一个空格。
 
 历史仅保存在内存，退出后消失。每轮发送完整历史，因此长对话会增加输入 token 用量，并可能达到上下文上限；可用 `/clear` 重置。
-当前版本支持文本多轮对话、流式输出和工具调用（仅 Anthropic provider）。
+当前版本支持文本多轮对话、流式输出和工具调用，两个 provider 都可以使用工具。
 
 ## 工具
 
@@ -118,7 +118,7 @@ $env:ANTHROPIC_API_KEY = [Environment]::GetEnvironmentVariable("ANTHROPIC_API_KE
 - `zanbot/memory.py`：本地 SQLite 记忆存储、密钥过滤和召回。
 - `zanbot/memory_extract.py`：提取提示词、回复校验和后台线程。
 - `zanbot/chatgpt_auth.py`：OAuth、凭据加密、账户切换、续期和退出登录。
-- `zanbot/chatgpt.py`：ChatGPT 模型列表和 Responses 流式请求。
+- `zanbot/chatgpt.py`：ChatGPT 模型列表、Responses 流式请求，以及 Zanbot 历史与 Responses 条目（函数调用、推理内容）之间的转换。
 
 ## Token Monitor 接入
 

@@ -259,3 +259,13 @@ class Tool:
   工具行之前如果当前行没结束会先换行；工具行之后，下一步开头的那个换行会被去掉，避免多出空行。
 - **顺带修掉的编码问题（真实运行时发现）**：Windows 上 stdin / stdout 接管道时，Python 默认用 cp1252。PowerShell 管道送进来的是带 BOM 的 UTF-8，中文被解成乱码，其中无效字符让 API 返回 400；打印 `→` 则直接让程序崩溃（记忆提示里的 `✓` 也有同样隐患）。现在 `main.py` 启动时，凡是接管道或文件的流都改用 UTF-8（输入用 `utf-8-sig` 去掉 BOM，无法编码的字符替换而不报错）；控制台不受影响。
 - 没做：状态栏显示"第 n 步"。目前每次调用都有一行，暂时够用。
+
+## 13. N7：ChatGPT 也能用工具（2026-11-02）
+
+- **思路：内部统一用 Anthropic 的格式，只在 ChatGPT 适配器边界做转换。** 循环、权限、副作用记录、显示都不用改。
+  - 发出去：`to_input` 把历史转成 Responses 的输入条目。`tool_use` → `function_call`（`call_id` 就是 `tool_use` 的 id），`tool_result` → `function_call_output`（出错的结果前面加 `Error: `，因为 Responses 没有 `is_error` 字段）。文字和调用保持原来的顺序；Anthropic 的 thinking 块直接跳过。工具定义转成 `{"type": "function", ..., "strict": false}`；不用 strict，是因为 strict 要求所有参数都必填，而我们的工具有可选参数。
+  - 收回来：`function_call` 条目 → `tool_use` 块，有调用时 `stop_reason` 记为 `tool_use`。参数为空串时按 `{}` 处理（和 N1 在 Anthropic 那边遇到的情况一样）。
+- **推理内容**：`store=false` 时服务端什么都不保存，所以开启工具时请求里加 `include: ["reasoning.encrypted_content"]`，把返回的 `reasoning` 条目作为新的 `reasoning` 块原样存进历史，下一步再原样发回。动手前先用真实接口试过，plan 共享路由接受 `tools` 和 `include`。
+- **收尾步**（D3）：`tool_choice` 转成字符串 `"none"`。
+- **会话**：两个 provider 都开放工具；system prompt 里"因为 provider 不支持所以没有工具"的说明已删除。
+- **真实验证**：用 `gpt-6.1-terra` 跑了和 N5 相同的五个场景（临时工作区和临时记忆库），全部通过。和 Claude 的一个区别：GPT 改 todo.md 时没有先读文件，而是直接 `edit_file`；因为 `edit_file` 只在原文唯一时才生效，这样也是安全的。

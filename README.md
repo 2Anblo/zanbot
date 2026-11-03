@@ -25,7 +25,7 @@ Optional defaults: set `ZANBOT_PROVIDER=chatgpt` and `CHATGPT_MODEL` in your env
 
 On Windows, encrypted credentials live under `%LOCALAPPDATA%/zanbot`, outside this repository. The encryption key is held in the OS credential manager through `keyring`. Other platforms use `~/.config/zanbot` and require a configured secure OS keyring. Token renewal is automatic and serialized across processes. If renewal fails or a request returns HTTP 401, run `--login` again. Never copy tokens into project files.
 
-The ChatGPT provider uses the public Responses API with `store=false` and `stream=true`. It sends full conversation history and saves a turn only after `response.completed`. It does not use ChatGPT website endpoints or another application's cached credentials. The current plan-sharing route does not accept `max_output_tokens`, so `Config.max_tokens` applies only to Anthropic.
+The ChatGPT provider uses the public Responses API with `store=false` and `stream=true`. It sends full conversation history and saves a turn only after `response.completed`. It does not use ChatGPT website endpoints or another application's cached credentials. The current plan-sharing route does not accept `max_output_tokens`, so `Config.max_tokens` applies only to Anthropic. Tools use Responses function calling; with tools on, Zanbot also asks for the encrypted reasoning items and sends them back unchanged between steps, since the server stores nothing.
 
 See the [integration design](docs/chatgpt-sign-in.md) and [official sign-in documentation](https://developers.openai.com/siwc/token-sharing-open-source/sign-in). Automated tests mock authentication and inference; a real browser sign-in and completed inference are required to verify your account's access.
 
@@ -62,7 +62,7 @@ Do not put your actual API key in project files.
 - Unknown `/` commands are reported with a suggestion instead of being sent to the model. To send a message that starts with `/`, add a space before it.
 
 History is kept in memory and is lost when the application exits. Each turn sends the full history, so longer conversations use more input tokens and may reach the context limit. Use `/clear` to reset it.
-The current version supports multi-turn text conversations, streaming output, and tool calling (Anthropic provider only).
+The current version supports multi-turn text conversations, streaming output, and tool calling with both providers.
 
 ## Tools
 
@@ -118,7 +118,7 @@ A turn is saved only after the complete ending event is received. If the stream 
 - `zanbot/memory.py`: local SQLite memory storage, secret filtering, and recall.
 - `zanbot/memory_extract.py`: extraction prompt, reply validation, and the background worker.
 - `zanbot/chatgpt_auth.py`: OAuth, encrypted credentials, account selection, renewal, and logout.
-- `zanbot/chatgpt.py`: ChatGPT model catalog and Responses API streaming.
+- `zanbot/chatgpt.py`: ChatGPT model catalog, Responses API streaming, and conversion between Zanbot's history and Responses items (function calls, reasoning).
 
 ## Token Monitor integration
 

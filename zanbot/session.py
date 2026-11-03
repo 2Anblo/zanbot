@@ -158,8 +158,8 @@ class ChatSession:
             self.info("Cancelled.")
 
     def active_tools(self):
-        # Tools are Anthropic-only for now (roadmap N7).
-        return self.tools if self.config.provider == "anthropic" else None
+        # Both providers support tools (Anthropic tool use, ChatGPT function calling).
+        return self.tools
 
     def reply(self, text):
         system = self.system_prompt()
@@ -287,10 +287,7 @@ class ChatSession:
             memory = "off"
         else:
             memory = "on" if self.worker is not None and self.worker.enabled else "paused"
-        if self.active_tools() is not None:
-            tools = True
-        else:
-            tools = "no-tools" if self.tools is None else "provider"
+        tools = True if self.active_tools() is not None else "no-tools"
         return build_system_prompt(memories, date.today(), memory, tools=tools)
 
     def clear(self):
