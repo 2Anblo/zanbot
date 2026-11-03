@@ -262,7 +262,7 @@ class MainWiringTests(unittest.TestCase):
 
     def test_tools_are_offered_by_default(self, post, config, output):
         sent = self.run_main(post)
-        self.assertEqual([t["name"] for t in sent["tools"]], ["edit_file", "list_dir", "read_file", "run_shell", "write_file"])
+        self.assertEqual([t["name"] for t in sent["tools"]], ["edit_file", "list_dir", "read_file", "run_shell", "web_fetch", "write_file"])
 
     def test_no_tools_flag(self, post, config, output):
         self.assertNotIn("tools", self.run_main(post, "--no-tools"))
